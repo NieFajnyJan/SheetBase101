@@ -1,4 +1,5 @@
-oject# Specyfikacja projektu – SheetBase
+
+# Specyfikacja projektu – SheetBase
 
 System do ewidencji i rozliczania wspólnych wydatków biurowych (aplikacja Django).
 
