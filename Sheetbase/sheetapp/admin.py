@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import User
+from .models import Transaction, User
 
 
 @admin.register(User)
@@ -24,3 +24,18 @@ class UserAdmin(BaseUserAdmin):
             },
         ),
     )
+
+
+@admin.register(Transaction)
+class TransactionAdmin(admin.ModelAdmin):
+    list_display = ("date", "description", "amount", "payer", "created_by", "created_at")
+    list_filter = ("payer", "date")
+    search_fields = ("description",)
+    date_hierarchy = "date"
+    readonly_fields = ("created_by", "created_at")
+
+    def save_model(self, request, obj, form, change):
+        # Whoever adds the entry in the admin is recorded as its author.
+        if not change:
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)

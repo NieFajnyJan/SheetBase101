@@ -1,6 +1,8 @@
 from django.test import TestCase
 from django.urls import reverse
 
+from django.db import models
+
 from .models import User
 
 PASSWORD = "Sup3r-secret-pw!"
@@ -179,3 +181,74 @@ class DexLoginTests(TestCase):
         self.assertEqual(
             params["redirect_uri"], ["http://testserver/accounts/oidc/dex/login/callback/"]
         )
+
+
+# --------------------------------------------------------------------------- Transactions
+from decimal import Decimal
+
+from django.core.exceptions import ValidationError
+
+from .models import Transaction
+
+
+class TransactionModelTests(TestCase):
+    def setUp(self):
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+
+    def make(self, amount, **fields):
+        return Transaction.objects.create(
+            amount=amount, payer=self.ola, created_by=self.ola, description="Kawa", **fields
+        )
+
+    def test_amount_is_stored_exactly(self):
+        for amount in ("12.34", "0.10", "0.01", "99999999.99"):
+            pk = self.make(Decimal(amount)).pk
+            saved = Transaction.objects.get(pk=pk).amount
+            self.assertIsInstance(saved, Decimal)
+            self.assertEqual(saved, Decimal(amount))
+            self.assertEqual(str(saved), amount)
+
+    def test_sums_are_exact(self):
+        # 0.1 + 0.2 != 0.3 with floats; with Decimal it must be exact.
+        self.make(Decimal("0.10"))
+        self.make(Decimal("0.20"))
+        total = Transaction.objects.aggregate(total=models.Sum("amount"))["total"]
+        self.assertEqual(total, Decimal("0.30"))
+
+    def test_amount_must_be_positive(self):
+        for amount in ("0.00", "-5.00"):
+            t = Transaction(amount=Decimal(amount), payer=self.ola, created_by=self.ola, description="x")
+            with self.assertRaises(ValidationError, msg=amount):
+                t.full_clean()
+
+    def test_amount_more_than_two_decimal_places_rejected(self):
+        t = Transaction(amount=Decimal("1.005"), payer=self.ola, created_by=self.ola, description="x")
+        with self.assertRaises(ValidationError):
+            t.full_clean()
+
+    def test_date_defaults_to_today(self):
+        from django.utils import timezone
+
+        self.assertEqual(self.make(Decimal("1.00")).date, timezone.localdate())
+
+    def test_payer_with_transactions_cannot_be_deleted(self):
+        from django.db.models import ProtectedError
+
+        self.make(Decimal("1.00"))
+        with self.assertRaises(ProtectedError):
+            self.ola.delete()
+
+
+class TransactionAdminTests(TestCase):
+    def test_admin_add_records_who_created_it(self):
+        admin_user = User.objects.create_superuser("boss", "boss@example.com", "x")
+        payer = User.objects.create_user("ola", "ola@example.com")
+        self.client.force_login(admin_user)
+        response = self.client.post(
+            reverse("admin:sheetapp_transaction_add"),
+            {"amount": "12.34", "payer": payer.pk, "description": "Papier", "date": "2026-11-04"},
+        )
+        self.assertEqual(response.status_code, 302)
+        t = Transaction.objects.get()
+        self.assertEqual((t.amount, t.payer, t.created_by), (Decimal("12.34"), payer, admin_user))
+        self.assertContains(self.client.get(reverse("admin:sheetapp_transaction_changelist")), "Papier")
