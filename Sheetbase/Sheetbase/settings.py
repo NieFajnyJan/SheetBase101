@@ -10,17 +10,28 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load secrets from Sheetbase/.env (git-ignored) as KEY=value lines.
+# Real environment variables take precedence.
+_env_file = BASE_DIR / '.env'
+if _env_file.exists():
+    for _line in _env_file.read_text().splitlines():
+        _key, _sep, _value = _line.partition('=')
+        if _sep and not _line.lstrip().startswith('#'):
+            os.environ.setdefault(_key.strip(), _value.strip().strip('"\''))
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-sh)o^twj_^oq%!rgge9%ci_ft%u1n(gq2*7_vuh-car1abof-o'
+# Set SECRET_KEY in Sheetbase/.env (git-ignored) or the environment.
+SECRET_KEY = os.environ['SECRET_KEY']
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
