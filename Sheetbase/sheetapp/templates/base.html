@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}SheetBase{% endblock %}</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 0; color: #222; background: #fafafa; }
+    header { background: #2b3a55; color: #fff; padding: .8rem 1rem; display: flex; align-items: center; gap: 1rem; }
+    header a, header button { color: #fff; text-decoration: none; }
+    header .brand { font-weight: 700; font-size: 1.1rem; margin-right: auto; }
+    header form { margin: 0; }
+    header button { background: none; border: 1px solid #fff8; border-radius: 4px; padding: .25rem .7rem; cursor: pointer; font: inherit; }
+    main { max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
+    .card { background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; padding: 1.2rem 1.5rem; }
+    .card p { margin: .8rem 0; }
+    label { display: block; font-weight: 600; margin-bottom: .25rem; }
+    input[type=text], input[type=email], input[type=password] { width: 100%; box-sizing: border-box; padding: .5rem; border: 1px solid #ccc; border-radius: 4px; font: inherit; }
+    .helptext, .helptext ul { color: #777; font-size: .85rem; }
+    .helptext ul { margin: .3rem 0 0; padding-left: 1.2rem; }
+    .errorlist { color: #b00020; list-style: none; padding: 0; margin: .2rem 0; font-size: .9rem; }
+    .btn { background: #2b3a55; color: #fff; border: 0; border-radius: 4px; padding: .6rem 1.3rem; font: inherit; cursor: pointer; }
+    .btn-social { width: 100%; background: #fff; color: #222; border: 1px solid #ccc; margin-bottom: .5rem; }
+    .btn-social:hover { background: #f3f3f3; }
+    .divider { display: flex; align-items: center; gap: .6rem; color: #999; font-size: .9rem; }
+    .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid #e3e3e3; }
+    .msg { background: #e6f4ea; border-radius: 6px; padding: .6rem 1rem; }
+    .muted { color: #777; }
+  </style>
+</head>
+<body>
+  <header>
+    <a class="brand" href="{% url 'home' %}">SheetBase</a>
+    {% if user.is_authenticated %}
+      <span>{{ user }}</span>
+      {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
+      <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Log out</button></form>
+    {% else %}
+      <a href="{% url 'login' %}">Log in</a>
+    {% endif %}
+  </header>
+  <main>
+    {% for message in messages %}<p class="msg">{{ message }}</p>{% endfor %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

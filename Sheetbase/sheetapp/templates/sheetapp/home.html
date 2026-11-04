@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+
+{% block content %}
+  <div class="card">
+    {% if user.is_authenticated %}
+      <h1>Hi, {{ user.first_name|default:user.username }}!</h1>
+      <p>You're logged in as <strong>{{ user.username }}</strong> ({{ user.email }}).</p>
+      <p class="muted">Expenses and balances will appear here.</p>
+    {% else %}
+      <h1>SheetBase</h1>
+      <p>Shared office expenses, settled fairly.</p>
+      <p><a class="btn" href="{% url 'login' %}">Log in</a></p>
+    {% endif %}
+  </div>
+{% endblock %}

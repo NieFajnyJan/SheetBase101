@@ -1,0 +1,14 @@
+{% load socialaccount %}
+{% comment %}
+  One "Continue with ..." button per configured provider (Google, Dex).
+  A provider only appears once its client ID and secret are set (see settings.py).
+{% endcomment %}
+{% get_providers as socialaccount_providers %}
+{% for provider in socialaccount_providers %}
+  <form method="post" action="{% provider_login_url provider next=request.GET.next %}">
+    {% csrf_token %}
+    <button class="btn btn-social" type="submit">Continue with {{ provider.name }}</button>
+  </form>
+{% empty %}
+  <p class="msg">No login providers are configured yet – set them up in <code>.env</code>.</p>
+{% endfor %}

@@ -1,0 +1,3 @@
+{% extends "base.html" %}
+{% comment %}Makes allauth's own pages (Google login errors, cancel, etc.) use the SheetBase layout.{% endcomment %}
+{% block title %}{% block head_title %}{% endblock head_title %} · SheetBase{% endblock title %}
