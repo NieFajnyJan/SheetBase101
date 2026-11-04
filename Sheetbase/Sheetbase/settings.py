@@ -48,7 +48,12 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-    'sheetapp',
+    'sheetapp',  # before allauth, so our templates override allauth's
+    'allauth',
+    'allauth.account',
+    'allauth.socialaccount',
+    'allauth.socialaccount.providers.google',
+    'allauth.socialaccount.providers.openid_connect',  # Dex
 ]
 
 AUTH_USER_MODEL = 'sheetapp.User'
@@ -64,7 +69,58 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'allauth.account.middleware.AccountMiddleware',
 ]
+
+AUTHENTICATION_BACKENDS = [
+    'django.contrib.auth.backends.ModelBackend',  # only for /admin/ (superuser password)
+    'allauth.account.auth_backends.AuthenticationBackend',  # Google, Dex
+]
+
+# --- Google login (django-allauth) ---
+# Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in Sheetbase/.env or the
+# environment. Until both are set, the "Continue with Google" button is hidden.
+SOCIALACCOUNT_PROVIDERS = {
+    'google': {
+        'SCOPE': ['profile', 'email'],
+        'AUTH_PARAMS': {'access_type': 'online'},
+        'APPS': [
+            {
+                'client_id': os.environ['GOOGLE_CLIENT_ID'],
+                'secret': os.environ['GOOGLE_CLIENT_SECRET'],
+            }
+        ] if os.environ.get('GOOGLE_CLIENT_ID') and os.environ.get('GOOGLE_CLIENT_SECRET') else [],
+    },
+    # Dex (OpenID Connect). Set DEX_CLIENT_ID, DEX_CLIENT_SECRET and DEX_SERVER_URL
+    # in Sheetbase/.env. Redirect URI to register in Dex:
+    #   http://127.0.0.1:8000/accounts/oidc/dex/login/callback/
+    'openid_connect': {
+        'APPS': [
+            {
+                'provider_id': 'dex',
+                'name': 'Dex',
+                'client_id': os.environ['DEX_CLIENT_ID'],
+                'secret': os.environ['DEX_CLIENT_SECRET'],
+                'settings': {
+                    'server_url': os.environ.get('DEX_SERVER_URL', 'http://127.0.0.1:5556/dex'),
+                },
+            }
+        ] if os.environ.get('DEX_CLIENT_ID') and os.environ.get('DEX_CLIENT_SECRET') else [],
+    },
+}
+# Google accounts get a username, email and name automatically, so no extra form.
+SOCIALACCOUNT_AUTO_SIGNUP = True
+# Someone who already signed up with a password and then uses Google with the
+# same (Google-verified) email is logged into that same account, not a new one.
+SOCIALACCOUNT_EMAIL_AUTHENTICATION = True
+SOCIALACCOUNT_EMAIL_AUTHENTICATION_AUTO_CONNECT = True
+# No local accounts: people sign up and log in only via Google / Dex (later Discord).
+# This also turns off allauth's password signup, password reset and email pages.
+SOCIALACCOUNT_ONLY = True
+ACCOUNT_EMAIL_VERIFICATION = 'none'  # required by SOCIALACCOUNT_ONLY; providers verify emails
+# Asked only if a provider doesn't give a usable email/username. Matches our User model.
+ACCOUNT_SIGNUP_FIELDS = ['email*', 'username*']
+ACCOUNT_UNIQUE_EMAIL = True
 
 ROOT_URLCONF = 'Sheetbase.urls'
 

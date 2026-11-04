@@ -3,13 +3,15 @@
 
 System do ewidencji i rozliczania wspólnych wydatków biurowych (aplikacja Django).
 
+**Persona – Operator:** użytkownik, który kupuje rzeczy dla biura i wykłada za nie pieniądze; pozostali członkowie oddają mu swoją część.
+
 ---
 
 ## 1. Cele
 
 - Wiedzieć, czy wszyscy oddali po równo, a jeśli nie – kto.
 - Sprawdzać, czy suma całkowita się zgadza.
-- Kwota wydana przez Jaśka musi się zgadzać z wydatkami pozostałych członków.
+- Kwota wydana przez Operatora musi się zgadzać z wydatkami pozostałych członków.
 - Śledzić wydatki w celu wykrywania nieprawidłowości.
 - Prezentować wydatki w czytelnej formie.
 - Zestawiać miesięczne koszty do porównania *(niski priorytet)*.
@@ -35,7 +37,7 @@ System do ewidencji i rozliczania wspólnych wydatków biurowych (aplikacja Djan
 - Każdy użytkownik ma własne saldo *all-time* (wszystkie wydatki od momentu założenia arkusza).
 - Saldo kont aktualizuje się na stronie dynamicznie – po dodaniu przelewu między użytkownikami saldo zmienia się automatycznie.
 - Bieżący podgląd, kto ile jest komu winny – najlepiej w formie tabeli.
-- Kierunek długu: czy dana osoba jest winna Jaśkowi, czy Jasiek jej.
+- Kierunek długu: czy dana osoba jest winna Operatorowi, czy Operator jej.
 
 ### 2.4. Dzielenie wydatków
 
@@ -46,7 +48,7 @@ System do ewidencji i rozliczania wspólnych wydatków biurowych (aplikacja Djan
 
 - Drobne wydatki sumują się w większe kwoty, które można sensownie oddać (priorytetyzacja opłat – mniejsze wydatki czekają, aż uzbiera się większa suma).
 - Reszta z zaokrąglonych spłat przechodzi do zaplanowanych transakcji.
-  *Przykład:* ktoś jest winny Jaśkowi 90 zł i oddaje banknot 100 zł – nadwyżka 10 zł staje się zaplanowaną transakcją.
+  *Przykład:* ktoś jest winny Operatorowi 90 zł i oddaje banknot 100 zł – nadwyżka 10 zł staje się zaplanowaną transakcją.
 
 ### 2.6. Rozliczenia i faktury
 
