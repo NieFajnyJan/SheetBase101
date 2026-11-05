@@ -118,12 +118,12 @@ class GoogleLoginTests(TestCase):
         self.google_login(google_profile())
         self.client.logout()
         self.google_login(google_profile())
-        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(User.objects.exclude(username=SHOP_USERNAME).count(), 1)
 
     def test_existing_user_is_linked_by_verified_email(self):
         existing = User.objects.create_user("jan", "jan@example.com", PASSWORD)
         self.google_login(google_profile(sub="999", email="jan@example.com"))
-        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(User.objects.exclude(username=SHOP_USERNAME).count(), 1)
         self.assertEqual(int(self.client.session["_auth_user_id"]), existing.pk)
         self.assertTrue(existing.socialaccount_set.filter(provider="google").exists())
 
@@ -188,16 +188,17 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 
-from .models import Transaction
+from .models import SHOP_USERNAME, Transaction
 
 
 class TransactionModelTests(TestCase):
     def setUp(self):
         self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
 
     def make(self, amount, **fields):
         return Transaction.objects.create(
-            amount=amount, payer=self.ola, created_by=self.ola, description="Kawa", **fields
+            amount=amount, payer=self.ola, recipient=self.shop, created_by=self.ola, description="Kawa", **fields
         )
 
     def test_amount_is_stored_exactly(self):
@@ -217,12 +218,12 @@ class TransactionModelTests(TestCase):
 
     def test_amount_must_be_positive(self):
         for amount in ("0.00", "-5.00"):
-            t = Transaction(amount=Decimal(amount), payer=self.ola, created_by=self.ola, description="x")
+            t = Transaction(amount=Decimal(amount), payer=self.ola, recipient=self.shop, created_by=self.ola, description="x")
             with self.assertRaises(ValidationError, msg=amount):
                 t.full_clean()
 
     def test_amount_more_than_two_decimal_places_rejected(self):
-        t = Transaction(amount=Decimal("1.005"), payer=self.ola, created_by=self.ola, description="x")
+        t = Transaction(amount=Decimal("1.005"), payer=self.ola, recipient=self.shop, created_by=self.ola, description="x")
         with self.assertRaises(ValidationError):
             t.full_clean()
 
@@ -230,6 +231,37 @@ class TransactionModelTests(TestCase):
         from django.utils import timezone
 
         self.assertEqual(self.make(Decimal("1.00")).date, timezone.localdate())
+
+    def test_date_range(self):
+        from datetime import date
+        from unittest import mock
+
+        from .models import validate_transaction_date
+
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2026, 11, 5)):
+            for ok in (date(2026, 11, 5), date(2024, 11, 5)):
+                validate_transaction_date(ok)  # no error
+            for bad in (date(2026, 11, 6), date(2024, 11, 4)):
+                with self.assertRaises(ValidationError, msg=bad):
+                    validate_transaction_date(bad)
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2028, 2, 29)):
+            validate_transaction_date(date(2026, 2, 28))  # leap day: two years back is 28 Feb
+            with self.assertRaises(ValidationError):
+                validate_transaction_date(date(2026, 2, 27))
+
+    def test_dev_sheet_rejects_future_date(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        tomorrow = timezone.localdate() + timedelta(days=1)
+        response = self.client.post(reverse("dev_sheet"), {
+            "amount": "1.00", "payer": boss.pk, "recipient": self.shop.pk,
+            "description": "x", "date": tomorrow.isoformat()})
+        self.assertContains(response, "can&#x27;t be in the future")
+        self.assertFalse(Transaction.objects.exists())
 
     def test_payer_with_transactions_cannot_be_deleted(self):
         from django.db.models import ProtectedError
@@ -246,9 +278,151 @@ class TransactionAdminTests(TestCase):
         self.client.force_login(admin_user)
         response = self.client.post(
             reverse("admin:sheetapp_transaction_add"),
-            {"amount": "12.34", "payer": payer.pk, "description": "Papier", "date": "2026-11-04"},
+            {"amount": "12.34", "payer": payer.pk, "recipient": User.objects.get(username=SHOP_USERNAME).pk,
+             "description": "Papier", "date": "2026-11-04"},
         )
         self.assertEqual(response.status_code, 302)
         t = Transaction.objects.get()
         self.assertEqual((t.amount, t.payer, t.created_by), (Decimal("12.34"), payer, admin_user))
         self.assertContains(self.client.get(reverse("admin:sheetapp_transaction_changelist")), "Papier")
+
+
+# --------------------------------------------------------------------------- Temporary dev sheet
+class DevSheetTests(TestCase):
+    def setUp(self):
+        self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.url = reverse("dev_sheet")
+
+    def test_staff_only(self):
+        self.assertEqual(self.client.get(self.url).status_code, 302)  # anonymous -> login
+        self.client.force_login(self.jan)
+        self.assertEqual(self.client.get(self.url).status_code, 403)
+
+    def test_add_and_see_it(self):
+        self.client.force_login(self.boss)
+        self.client.post(self.url, {"amount": "4606.16", "payer": self.boss.pk,
+                                    "recipient": self.shop.pk, "description": "3 fotele", "date": "2026-11-05"})
+        self.assertEqual(Transaction.objects.get().created_by, self.boss)
+        response = self.client.get(self.url)
+        self.assertContains(response, "3 fotele")
+        self.assertEqual(response.context["done_total"], Decimal("4606.16"))
+
+
+
+class DoneTransactionIsFinalTests(TestCase):
+    def setUp(self):
+        self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.t = Transaction.objects.create(amount=Decimal("1.00"), payer=self.boss,
+                                            recipient=User.objects.get(username=SHOP_USERNAME),
+                                            created_by=self.boss, description="a")
+
+    def test_cannot_be_edited(self):
+        self.t.amount = Decimal("2.00")
+        with self.assertRaises(ValueError):
+            self.t.save()
+        self.assertEqual(Transaction.objects.get().amount, Decimal("1.00"))
+
+    def test_cannot_be_deleted(self):
+        with self.assertRaises(ValueError):
+            self.t.delete()
+        self.assertTrue(Transaction.objects.exists())
+
+    def test_admin_shows_no_edit_or_delete(self):
+        self.client.force_login(self.boss)
+        delete_url = reverse("admin:sheetapp_transaction_delete", args=[self.t.pk])
+        self.assertEqual(self.client.post(delete_url, {"post": "yes"}).status_code, 403)
+        change_url = reverse("admin:sheetapp_transaction_change", args=[self.t.pk])
+        self.client.post(change_url, {"amount": "2.00", "payer": self.boss.pk,
+                                      "recipient": self.t.recipient.pk, "description": "a", "date": "2026-11-05"})
+        self.assertEqual(Transaction.objects.get().amount, Decimal("1.00"))
+
+
+class ShopUserTests(TestCase):
+    def test_shop_user_exists_and_cannot_log_in(self):
+        shop = User.objects.get(username=SHOP_USERNAME)
+        self.assertTrue(shop.is_shop)
+        self.assertFalse(shop.has_usable_password())
+
+    def test_add_shops_on_dev_sheet(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        for name in ("Biedronka", "Żabka"):
+            self.client.post(reverse("dev_sheet"), {"add_shop": "", "name": name})
+        shops = User.objects.filter(is_shop=True).exclude(username=SHOP_USERNAME)
+        self.assertEqual(sorted(s.first_name for s in shops), ["Biedronka", "Żabka"])
+        self.assertFalse(any(s.has_usable_password() for s in shops))
+        self.assertFalse(Transaction.objects.exists())  # the transaction form wasn't touched
+
+    def test_duplicate_shop_rejected(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        self.client.post(reverse("dev_sheet"), {"add_shop": "", "name": "Biedronka"})
+        response = self.client.post(reverse("dev_sheet"), {"add_shop": "", "name": " biedronka "})
+        self.assertContains(response, "This shop already exists.")
+        self.assertEqual(User.objects.filter(first_name__iexact="biedronka").count(), 1)
+
+    def test_paid_to_is_required(self):
+        payer = User.objects.create_user("ola", "ola@example.com")
+        t = Transaction(amount=Decimal("1.00"), payer=payer, created_by=payer, description="x")
+        with self.assertRaises(ValidationError):
+            t.full_clean()
+
+    def test_dev_sheet_rejects_done_without_paid_to(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        response = self.client.post(reverse("dev_sheet"), {
+            "amount": "1.00", "payer": boss.pk,
+            "description": "x", "date": "2026-11-05"})
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_shop_can_pay_for_a_return(self):
+        # A return is its own transaction: the shop pays the money back to the buyer.
+        jan = User.objects.create_user("jan", "jan@example.com")
+        shop = User.objects.get(username=SHOP_USERNAME)
+        Transaction.objects.create(amount=Decimal("49.99"), payer=jan, recipient=shop,
+                                   created_by=jan, description="Czajnik")
+        refund = Transaction(amount=Decimal("49.99"), payer=shop, recipient=jan,
+                             created_by=jan, description="Zwrot: czajnik")
+        refund.full_clean()  # no validation error
+        refund.save()
+        self.assertEqual(Transaction.objects.count(), 2)
+
+
+class PayerIsNotRecipientTests(TestCase):
+    def setUp(self):
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+
+    def build(self):
+        return Transaction(amount=Decimal("1.00"), payer=self.ola, recipient=self.ola,
+                           created_by=self.ola, description="x")
+
+    def test_rejected_by_validation(self):
+        with self.assertRaises(ValidationError):
+            self.build().full_clean()
+
+    def test_rejected_by_database(self):
+        from django.db import IntegrityError
+
+        with self.assertRaises(IntegrityError):
+            self.build().save()
+
+    def test_dev_sheet_shows_error(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        response = self.client.post(reverse("dev_sheet"), {
+            "amount": "1.00", "payer": boss.pk, "recipient": boss.pk,
+            "description": "x", "date": "2026-11-05"})
+        self.assertContains(response, "must be different people")
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_admin_shows_error(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        response = self.client.post(reverse("admin:sheetapp_transaction_add"), {
+            "amount": "1.00", "payer": boss.pk, "recipient": boss.pk,
+            "description": "x", "date": "2026-11-05"})
+        self.assertContains(response, "must be different people")
+        self.assertFalse(Transaction.objects.exists())
