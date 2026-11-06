@@ -1,0 +1,98 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Transactions · SheetBase{% endblock %}
+
+{% block extra_head %}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
+<script>
+  // Calendar for "date paid" in dd/mm/yy. Same limits as the server: not in the future, max 2 years back.
+  document.addEventListener("DOMContentLoaded", () => {
+    if (!window.flatpickr) return;  // no CDN -> the text box still works
+    const twoYearsBack = new Date();
+    twoYearsBack.setFullYear(twoYearsBack.getFullYear() - 2);
+    flatpickr(".datepicker", {
+      dateFormat: "d/m/y", allowInput: true, maxDate: "today", minDate: twoYearsBack,
+      locale: { firstDayOfWeek: 1 },
+    });
+  });
+</script>
+<style>
+  main { max-width: 1100px; }
+  .card h2 { margin-top: 0; font-size: 1.15rem; }
+  .card p { margin: .5rem 0; }
+  /* Add form centred; the shop box sits beside it, collapsed until clicked. */
+  .forms { display: grid; grid-template-columns: 1fr minmax(0, 480px) 1fr; gap: 1rem; align-items: start; }
+  .forms > .form-card { grid-column: 2; }
+  .forms > .side { grid-column: 3; max-width: 260px; }
+  .side summary { cursor: pointer; font-weight: 600; }
+  .side form { margin-top: .8rem; }
+  @media (max-width: 900px) {
+    .forms { grid-template-columns: minmax(0, 480px); justify-content: center; }
+    .forms > .form-card, .forms > .side { grid-column: 1; max-width: none; }
+  }
+  h2.section { margin: 2rem 0 .5rem; }
+  .filters { display: flex; flex-wrap: wrap; gap: .8rem; align-items: end; margin-bottom: 1rem; }
+  .card.filters p { margin: 0; min-width: 150px; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
+  td.desc { white-space: normal; }
+  th { background: #f3f4f7; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <div class="forms">
+    <form class="card form-card" method="post">
+      {% csrf_token %}
+      <h2>Add done transaction</h2>
+      <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
+      {{ form.as_p }}
+      <button class="btn">Add</button>
+    </form>
+
+    {# Collapsed by default; stays open when the shop form has an error. #}
+    <details class="card side"{% if shop_form.errors %} open{% endif %}>
+      <summary>+ Add shop</summary>
+      <p class="muted">Shop missing from “paid to”? Add it here.</p>
+      <form method="post">
+        {% csrf_token %}
+        {{ shop_form.as_p }}
+        <button class="btn" name="add_shop">Add shop</button>
+      </form>
+    </details>
+  </div>
+
+  <h2 class="section">Done transactions</h2>
+
+  <form class="card filters" method="get">
+    {{ filter_form.as_p }}
+    <button class="btn">Filter</button>
+    {% if filtered %}<a href="{% url 'transactions' %}">Clear</a>{% endif %}
+  </form>
+
+  {% if transactions %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Date</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th></tr></thead>
+        <tbody>
+          {% for t in transactions %}
+            <tr>
+              <td>{{ t.date|date:"d/m/y" }}</td><td>{{ t.payer }}</td><td>{{ t.recipient }}</td><td class="desc">{{ t.description }}</td>
+              <td class="num">{{ t.amount|zl }}</td><td>{{ t.created_by }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td></td></tr></tfoot>
+      </table>
+    </div>
+  {% elif filtered %}
+    <p class="card muted">No transactions match these filters.</p>
+  {% else %}
+    <p class="card muted">No transactions yet – add the first one above.</p>
+  {% endif %}
+{% endblock %}

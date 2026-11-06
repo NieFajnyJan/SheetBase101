@@ -249,7 +249,7 @@ class TransactionModelTests(TestCase):
             with self.assertRaises(ValidationError):
                 validate_transaction_date(date(2026, 2, 27))
 
-    def test_dev_sheet_rejects_future_date(self):
+    def test_form_rejects_future_date(self):
         from datetime import timedelta
 
         from django.utils import timezone
@@ -257,9 +257,9 @@ class TransactionModelTests(TestCase):
         boss = User.objects.create_superuser("boss", "boss@example.com", "x")
         self.client.force_login(boss)
         tomorrow = timezone.localdate() + timedelta(days=1)
-        response = self.client.post(reverse("dev_sheet"), {
+        response = self.client.post(reverse("transactions"), {
             "amount": "1.00", "payer": boss.pk, "recipient": self.shop.pk,
-            "description": "x", "date": tomorrow.isoformat()})
+            "description": "x", "date": tomorrow.strftime("%d/%m/%y")})
         self.assertContains(response, "can&#x27;t be in the future")
         self.assertFalse(Transaction.objects.exists())
 
@@ -279,7 +279,7 @@ class TransactionAdminTests(TestCase):
         response = self.client.post(
             reverse("admin:sheetapp_transaction_add"),
             {"amount": "12.34", "payer": payer.pk, "recipient": User.objects.get(username=SHOP_USERNAME).pk,
-             "description": "Papier", "date": "2026-11-04"},
+             "description": "Papier", "date": today().isoformat()},
         )
         self.assertEqual(response.status_code, 302)
         t = Transaction.objects.get()
@@ -287,28 +287,145 @@ class TransactionAdminTests(TestCase):
         self.assertContains(self.client.get(reverse("admin:sheetapp_transaction_changelist")), "Papier")
 
 
-# --------------------------------------------------------------------------- Temporary dev sheet
-class DevSheetTests(TestCase):
+# --------------------------------------------------------------------------- Pages
+def today():
+    from django.utils import timezone
+
+    return timezone.localdate()
+
+
+class AddTransactionTests(TestCase):
     def setUp(self):
-        self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
-        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.jan = User.objects.create_user("jan", "jan@example.com")  # an ordinary member
+        self.ola = User.objects.create_user("ola", "ola@example.com")
         self.shop = User.objects.get(username=SHOP_USERNAME)
-        self.url = reverse("dev_sheet")
+        self.url = reverse("transactions")
 
-    def test_staff_only(self):
-        self.assertEqual(self.client.get(self.url).status_code, 302)  # anonymous -> login
+    def post(self, **fields):
+        data = {"amount": "12.49", "payer": self.jan.pk, "recipient": self.shop.pk,
+                "description": "Kawa", "date": today().strftime("%d/%m/%y")}
+        return self.client.post(self.url, {**data, **fields})
+
+    def test_logged_out_goes_to_login(self):
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}",
+                             fetch_redirect_response=False)
+
+    def test_defaults_are_me_and_today(self):
         self.client.force_login(self.jan)
-        self.assertEqual(self.client.get(self.url).status_code, 403)
+        form = self.client.get(self.url).context["form"]
+        self.assertEqual(form["payer"].value(), self.jan.pk)
+        self.assertEqual(form["date"].value(), today())
 
-    def test_add_and_see_it(self):
-        self.client.force_login(self.boss)
-        self.client.post(self.url, {"amount": "4606.16", "payer": self.boss.pk,
-                                    "recipient": self.shop.pk, "description": "3 fotele", "date": "2026-11-05"})
-        self.assertEqual(Transaction.objects.get().created_by, self.boss)
+    def test_member_adds_and_sees_it_in_the_list(self):
+        self.client.force_login(self.jan)
+        response = self.post(payer=self.ola.pk, recipient=self.jan.pk, amount="2137")
+        self.assertRedirects(response, self.url)
+        t = Transaction.objects.get()
+        self.assertEqual((t.payer, t.recipient, t.amount, t.created_by),
+                         (self.ola, self.jan, Decimal("2137"), self.jan))
+        self.assertContains(self.client.get(self.url), "Kawa")
+
+    def test_adding_keeps_filters(self):
+        self.client.force_login(self.jan)
+        response = self.client.post(f"{self.url}?payer={self.jan.pk}", {
+            "amount": "1.00", "payer": self.jan.pk, "recipient": self.shop.pk,
+            "description": "x", "date": today().strftime("%d/%m/%y")})
+        self.assertRedirects(response, f"{self.url}?payer={self.jan.pk}")
+
+    def test_date_is_dd_mm_yy(self):
+        self.client.force_login(self.jan)
+        self.assertContains(self.client.get(self.url), f'value="{today():%d/%m/%y}"')  # default shown as dd/mm/yy
+        self.post(date=f"{today():%d/%m/%Y}")  # a 4-digit year works too
+        self.assertEqual(Transaction.objects.get().date, today())
+        response = self.post(date=today().isoformat())  # yyyy-mm-dd is rejected
+        self.assertTrue(response.context["form"].errors["date"])
+
+    def test_comma_amount_accepted(self):
+        self.client.force_login(self.jan)
+        self.post(amount="12,49")
+        self.assertEqual(Transaction.objects.get().amount, Decimal("12.49"))
+
+    def test_bad_amount_keeps_input_and_shows_error(self):
+        self.client.force_login(self.jan)
+        for amount in ("0", "-1", "1.005", "abc"):
+            response = self.post(amount=amount, description="Zostaje")
+            self.assertEqual(response.status_code, 200, amount)
+            self.assertTrue(response.context["form"].errors["amount"], amount)
+            self.assertContains(response, "Zostaje")
+        self.assertFalse(Transaction.objects.exists())
+
+
+class TransactionListTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.url = reverse("transactions")
+        self.client.force_login(self.jan)
+
+    def make(self, amount, payer, recipient, when=None):
+        return Transaction.objects.create(amount=Decimal(amount), payer=payer, recipient=recipient,
+                                          created_by=payer, description=f"t{amount}", date=when or today())
+
+    def test_logged_out_goes_to_login(self):
+        self.client.logout()
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}",
+                             fetch_redirect_response=False)
+
+    def test_total_equals_sum_of_rows(self):
+        self.make("0.10", self.jan, self.shop)
+        self.make("0.20", self.ola, self.shop)
+        self.make("1234.50", self.ola, self.jan)
         response = self.client.get(self.url)
-        self.assertContains(response, "3 fotele")
-        self.assertEqual(response.context["done_total"], Decimal("4606.16"))
+        rows = list(response.context["transactions"])
+        self.assertEqual(len(rows), 3)
+        self.assertEqual(response.context["total"], sum(t.amount for t in rows))
+        self.assertEqual(response.context["total"], Decimal("1234.80"))
+        self.assertContains(response, "1\xa0234,80\xa0zł")  # shown as 1 234,80 zł
 
+    def test_dates_shown_as_dd_mm_yy(self):
+        from datetime import date
+
+        self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
+        self.assertContains(self.client.get(self.url), date(today().year, 1, 5).strftime("05/01/%y"))
+
+    def test_newest_first(self):
+        from datetime import timedelta
+
+        self.make("1.00", self.jan, self.shop, today() - timedelta(days=3))
+        self.make("2.00", self.jan, self.shop)
+        dates = [t.date for t in self.client.get(self.url).context["transactions"]]
+        self.assertEqual(dates, sorted(dates, reverse=True))
+
+    def test_filters_change_list_and_total(self):
+        from datetime import date
+
+        self.make("1.00", self.jan, self.shop)
+        self.make("2.00", self.ola, self.shop)
+        self.make("4.00", self.ola, self.jan)
+        last_year = date(today().year - 1, 6, 15)
+        self.make("8.00", self.jan, self.shop, last_year)
+
+        def total(**params):
+            return self.client.get(self.url, params).context["total"]
+
+        self.assertEqual(total(), Decimal("15.00"))
+        self.assertEqual(total(payer=self.ola.pk), Decimal("6.00"))
+        self.assertEqual(total(recipient=self.shop.pk), Decimal("11.00"))
+        self.assertEqual(total(payer=self.ola.pk, recipient=self.jan.pk), Decimal("4.00"))
+        self.assertEqual(total(year=last_year.year), Decimal("8.00"))
+        self.assertEqual(total(year=last_year.year, month=6), Decimal("8.00"))
+        self.assertEqual(total(year=last_year.year, month=7), 0)
+
+    def test_empty_list_says_so(self):
+        self.assertContains(self.client.get(self.url), "No transactions yet")
+
+    def test_zl_format(self):
+        from .templatetags.money import zl
+
+        for value, text in (("0", "0,00"), ("12.5", "12,50"), ("1234.5", "1\xa0234,50"),
+                            ("1234567.89", "1\xa0234\xa0567,89")):
+            self.assertEqual(zl(Decimal(value)), f"{text}\xa0zł")
 
 
 class DoneTransactionIsFinalTests(TestCase):
@@ -335,7 +452,7 @@ class DoneTransactionIsFinalTests(TestCase):
         self.assertEqual(self.client.post(delete_url, {"post": "yes"}).status_code, 403)
         change_url = reverse("admin:sheetapp_transaction_change", args=[self.t.pk])
         self.client.post(change_url, {"amount": "2.00", "payer": self.boss.pk,
-                                      "recipient": self.t.recipient.pk, "description": "a", "date": "2026-11-05"})
+                                      "recipient": self.t.recipient.pk, "description": "a", "date": today().isoformat()})
         self.assertEqual(Transaction.objects.get().amount, Decimal("1.00"))
 
 
@@ -345,11 +462,11 @@ class ShopUserTests(TestCase):
         self.assertTrue(shop.is_shop)
         self.assertFalse(shop.has_usable_password())
 
-    def test_add_shops_on_dev_sheet(self):
+    def test_add_shops_on_add_page(self):
         boss = User.objects.create_superuser("boss", "boss@example.com", "x")
         self.client.force_login(boss)
         for name in ("Biedronka", "Żabka"):
-            self.client.post(reverse("dev_sheet"), {"add_shop": "", "name": name})
+            self.client.post(reverse("transactions"), {"add_shop": "", "name": name})
         shops = User.objects.filter(is_shop=True).exclude(username=SHOP_USERNAME)
         self.assertEqual(sorted(s.first_name for s in shops), ["Biedronka", "Żabka"])
         self.assertFalse(any(s.has_usable_password() for s in shops))
@@ -358,8 +475,8 @@ class ShopUserTests(TestCase):
     def test_duplicate_shop_rejected(self):
         boss = User.objects.create_superuser("boss", "boss@example.com", "x")
         self.client.force_login(boss)
-        self.client.post(reverse("dev_sheet"), {"add_shop": "", "name": "Biedronka"})
-        response = self.client.post(reverse("dev_sheet"), {"add_shop": "", "name": " biedronka "})
+        self.client.post(reverse("transactions"), {"add_shop": "", "name": "Biedronka"})
+        response = self.client.post(reverse("transactions"), {"add_shop": "", "name": " biedronka "})
         self.assertContains(response, "This shop already exists.")
         self.assertEqual(User.objects.filter(first_name__iexact="biedronka").count(), 1)
 
@@ -369,12 +486,12 @@ class ShopUserTests(TestCase):
         with self.assertRaises(ValidationError):
             t.full_clean()
 
-    def test_dev_sheet_rejects_done_without_paid_to(self):
+    def test_form_rejects_done_without_paid_to(self):
         boss = User.objects.create_superuser("boss", "boss@example.com", "x")
         self.client.force_login(boss)
-        response = self.client.post(reverse("dev_sheet"), {
+        response = self.client.post(reverse("transactions"), {
             "amount": "1.00", "payer": boss.pk,
-            "description": "x", "date": "2026-11-05"})
+            "description": "x", "date": today().strftime("%d/%m/%y")})
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Transaction.objects.exists())
 
@@ -409,12 +526,12 @@ class PayerIsNotRecipientTests(TestCase):
         with self.assertRaises(IntegrityError):
             self.build().save()
 
-    def test_dev_sheet_shows_error(self):
+    def test_form_shows_error(self):
         boss = User.objects.create_superuser("boss", "boss@example.com", "x")
         self.client.force_login(boss)
-        response = self.client.post(reverse("dev_sheet"), {
+        response = self.client.post(reverse("transactions"), {
             "amount": "1.00", "payer": boss.pk, "recipient": boss.pk,
-            "description": "x", "date": "2026-11-05"})
+            "description": "x", "date": today().strftime("%d/%m/%y")})
         self.assertContains(response, "must be different people")
         self.assertFalse(Transaction.objects.exists())
 
@@ -423,6 +540,6 @@ class PayerIsNotRecipientTests(TestCase):
         self.client.force_login(boss)
         response = self.client.post(reverse("admin:sheetapp_transaction_add"), {
             "amount": "1.00", "payer": boss.pk, "recipient": boss.pk,
-            "description": "x", "date": "2026-11-05"})
+            "description": "x", "date": today().isoformat()})
         self.assertContains(response, "must be different people")
         self.assertFalse(Transaction.objects.exists())

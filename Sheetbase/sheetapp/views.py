@@ -1,11 +1,10 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.db.models import Sum
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET
 
-from .forms import ShopForm, TransactionForm
+from .forms import HistoryFilterForm, ShopForm, TransactionForm
 from .models import Transaction
 
 
@@ -22,12 +21,9 @@ def login_page(request):
 
 
 @login_required
-def dev_sheet(request):
-    """TEMPORARY page (staff only): add shops and done transactions without the admin and see
-    them in a table. To be replaced by the real pages from #8 and #9."""
-    if not request.user.is_staff:
-        raise PermissionDenied
-
+def transactions(request):
+    """One page: add a done transaction (#8), add a missing shop, and see all done transactions
+    with their total (#9), optionally filtered."""
     form = TransactionForm(initial={"payer": request.user})
     shop_form = ShopForm()
 
@@ -35,7 +31,7 @@ def dev_sheet(request):
         shop_form = ShopForm(request.POST)
         if shop_form.is_valid():
             messages.success(request, f"Added shop: {shop_form.save()}")
-            return redirect("dev_sheet")
+            return redirect(request.get_full_path())  # keeps the current filters
     elif request.method == "POST":
         form = TransactionForm(request.POST)
         if form.is_valid():
@@ -43,12 +39,17 @@ def dev_sheet(request):
             obj.created_by = request.user
             obj.save()
             messages.success(request, f"Added: {obj}")
-            return redirect("dev_sheet")
+            return redirect(request.get_full_path())
 
+    filter_form = HistoryFilterForm(request.GET)
     done = Transaction.objects.select_related("payer", "recipient", "created_by")
-    return render(request, "sheetapp/dev_sheet.html", {
+    if filter_form.is_valid():
+        done = filter_form.filter(done)
+    return render(request, "sheetapp/transactions.html", {
         "form": form,
         "shop_form": shop_form,
-        "done": done,
-        "done_total": done.aggregate(t=Sum("amount"))["t"] or 0,
+        "filter_form": filter_form,
+        "filtered": any(request.GET.get(f) for f in filter_form.fields),
+        "transactions": done,
+        "total": done.aggregate(t=Sum("amount"))["t"] or 0,
     })
