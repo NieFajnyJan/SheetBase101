@@ -78,16 +78,16 @@
   {% if transactions %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th></tr></thead>
+        <thead><tr><th>Date paid</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th><th>Added</th></tr></thead>
         <tbody>
           {% for t in transactions %}
             <tr>
               <td>{{ t.date|date:"d/m/y" }}</td><td>{{ t.payer }}</td><td>{{ t.recipient }}</td><td class="desc">{{ t.description }}</td>
-              <td class="num">{{ t.amount|zl }}</td><td>{{ t.created_by }}</td>
+              <td class="num">{{ t.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|date:"d/m/y" }}</td>
             </tr>
           {% endfor %}
         </tbody>
-        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td></td></tr></tfoot>
+        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td colspan="2"></td></tr></tfoot>
       </table>
     </div>
   {% elif filtered %}

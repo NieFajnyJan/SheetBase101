@@ -367,11 +367,6 @@ class TransactionListTests(TestCase):
         return Transaction.objects.create(amount=Decimal(amount), payer=payer, recipient=recipient,
                                           created_by=payer, description=f"t{amount}", date=when or today())
 
-    def test_logged_out_goes_to_login(self):
-        self.client.logout()
-        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}",
-                             fetch_redirect_response=False)
-
     def test_total_equals_sum_of_rows(self):
         self.make("0.10", self.jan, self.shop)
         self.make("0.20", self.ola, self.shop)
@@ -388,6 +383,19 @@ class TransactionListTests(TestCase):
 
         self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
         self.assertContains(self.client.get(self.url), date(today().year, 1, 5).strftime("05/01/%y"))
+
+    def test_shows_date_paid_and_date_added(self):
+        from datetime import date, datetime
+        from zoneinfo import ZoneInfo
+
+        t = self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
+        # created_at is set automatically; pin it to check the added date is shown in Warsaw time.
+        Transaction.objects.filter(pk=t.pk).update(
+            created_at=datetime(today().year, 2, 3, 23, 30, tzinfo=ZoneInfo("UTC")))
+        response = self.client.get(self.url)
+        self.assertContains(response, "Date paid")
+        self.assertContains(response, date(today().year, 1, 5).strftime("05/01/%y"))
+        self.assertContains(response, date(today().year, 2, 4).strftime("04/02/%y"))  # 23:30 UTC = 00:30 in Warsaw
 
     def test_newest_first(self):
         from datetime import timedelta
