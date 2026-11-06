@@ -8,7 +8,7 @@ from django.utils import timezone
 
 
 # Shops are users with is_shop=True that can't log in; purchases are paid to them.
-# This one is created in migration 0003; more can be added on the dev sheet.
+# This one is created in migration 0003; more can be added on the Transactions page.
 SHOP_USERNAME = "shop"
 
 # How far back a transaction may be logged.
@@ -83,7 +83,7 @@ class Transaction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.date}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
+        return f"{self.date:%d/%m/%y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
 
     # A done transaction is final: it can be added, never edited or deleted.
     def save(self, *args, **kwargs):
