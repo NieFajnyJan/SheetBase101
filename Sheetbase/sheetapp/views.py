@@ -3,10 +3,12 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied
 from django.db.models import Prefetch, Sum
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from .forms import CancelForm, CorrectionForm, HistoryFilterForm, ShopForm, TransactionForm
 from .models import Transaction, TransactionCorrection
+from .summary import all_time_summary, year_summary
 
 
 def transactions_with_history():
@@ -95,3 +97,13 @@ def cancel_transaction(request, pk):
         messages.success(request, str(correction))
         return redirect("transactions")
     return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": True})
+
+
+@login_required
+def summary(request):
+    """All time, then this year and last year (#13). On 1 January "last year" is the year that just ended."""
+    today = timezone.localdate()
+    return render(request, "sheetapp/summary.html", {
+        "all_time": all_time_summary(),
+        "summaries": [year_summary(today.year), year_summary(today.year - 1)],
+    })

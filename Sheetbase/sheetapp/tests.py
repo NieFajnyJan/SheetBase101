@@ -719,3 +719,177 @@ class CorrectionTests(TestCase):
         c = TransactionCorrection.objects.get()
         delete_url = reverse("admin:sheetapp_transactioncorrection_delete", args=[c.pk])
         self.assertEqual(self.client.post(delete_url, {"post": "yes"}).status_code, 403)
+
+
+# --------------------------------------------------------------------------- Yearly summary (#13)
+class YearlySummaryTests(TestCase):
+    def setUp(self):
+        from datetime import date
+
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.ewa = User.objects.create_user("ewa", "ewa@example.com")  # does nothing all year
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.url = reverse("summary")
+        self.client.force_login(self.jan)
+        self.this_year = today().year
+        self.d = lambda year, month=6: date(year, month, 15)
+
+    def make(self, amount, payer, recipient, when):
+        return Transaction.objects.create(amount=Decimal(amount), payer=payer, recipient=recipient,
+                                          created_by=self.jan, description="x", date=when)
+
+    def summaries(self):
+        return {s.year: s for s in self.client.get(self.url).context["summaries"]}
+
+    def row(self, summary, user):
+        return next(r for r in summary.rows if r.member == user)
+
+    def test_logged_out_goes_to_login(self):
+        self.client.logout()
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}",
+                             fetch_redirect_response=False)
+
+    def test_this_year_and_last_year(self):
+        self.make("10.00", self.jan, self.shop, self.d(self.this_year))
+        self.make("20.00", self.jan, self.shop, self.d(self.this_year - 1))
+        self.make("40.00", self.jan, self.shop, self.d(self.this_year - 2))  # too old – in neither table
+        s = self.summaries()
+        self.assertEqual(list(s), [self.this_year, self.this_year - 1])
+        self.assertEqual(s[self.this_year].purchases, Decimal("10.00"))
+        self.assertEqual(s[self.this_year - 1].purchases, Decimal("20.00"))
+        self.assertContains(self.client.get(self.url), "Yearly summary")
+
+    def test_columns_per_member_and_totals(self):
+        y = self.d(self.this_year)
+        self.make("100.00", self.jan, self.shop, y)  # purchase
+        self.make("50.00", self.ola, self.shop, y)  # purchase
+        self.make("5.50", self.shop, self.jan, y)  # return
+        self.make("30.00", self.ola, self.jan, y)  # ola pays jan back
+        s = self.summaries()[self.this_year]
+        jan, ola, ewa = self.row(s, self.jan), self.row(s, self.ola), self.row(s, self.ewa)
+        self.assertEqual((jan.purchases, jan.returns, jan.paid, jan.received),
+                         (Decimal("100.00"), Decimal("5.50"), 0, Decimal("30.00")))
+        self.assertEqual((ola.purchases, ola.returns, ola.paid, ola.received),
+                         (Decimal("50.00"), 0, Decimal("30.00"), 0))
+        self.assertEqual((ewa.purchases, ewa.paid), (0, 0))  # listed even with nothing
+        self.assertNotIn(self.shop, [r.member for r in s.rows])  # shops aren't members
+        self.assertEqual((s.purchases, s.returns, s.paid, s.received),
+                         (Decimal("150.00"), Decimal("5.50"), Decimal("30.00"), Decimal("30.00")))
+        self.assertEqual(s.total, Decimal("185.50"))
+
+    def test_shops_table(self):
+        lidl = User.objects.create(username="shop-lidl", email="lidl@sheetbase.invalid", first_name="Lidl",
+                                   is_shop=True)
+        unused = User.objects.create(username="shop-x", email="x@sheetbase.invalid", first_name="Unused",
+                                     is_shop=True)
+        y = self.d(self.this_year)
+        self.make("100.00", self.jan, self.shop, y)
+        self.make("50.00", self.ola, lidl, y)
+        self.make("20.00", self.jan, lidl, y)
+        self.make("5.50", lidl, self.jan, y)  # return
+        s = self.summaries()[self.this_year]
+        shops = {r.shop: (r.sold, r.returned) for r in s.shop_rows}
+        self.assertEqual(shops, {self.shop: (Decimal("100.00"), 0), lidl: (Decimal("70.00"), Decimal("5.50"))})
+        self.assertNotIn(unused, shops)  # only shops used that year
+        # Shop totals agree with the members' purchases and returns.
+        self.assertEqual(sum(r.sold for r in s.shop_rows), s.purchases)
+        self.assertEqual(sum(r.returned for r in s.shop_rows), s.returns)
+        page = self.client.get(self.url)
+        self.assertContains(page, "Bought from it")
+        self.assertContains(page, f"No purchases from shops in {self.this_year - 1}")
+
+    def test_total_matches_history_for_the_year(self):
+        for year in (self.this_year, self.this_year - 1):
+            self.make("100.00", self.jan, self.shop, self.d(year))
+            self.make("12.34", self.ola, self.jan, self.d(year, 1))
+            self.make("0.66", self.shop, self.ola, self.d(year, 3))
+        for year, s in self.summaries().items():
+            history = self.client.get(reverse("transactions"), {"year": year}).context["total"]
+            self.assertEqual(s.total, history, year)
+
+    def test_uses_corrected_values_and_skips_cancelled(self):
+        from .models import TransactionCorrection
+
+        fixed = self.make("124.90", self.jan, self.shop, self.d(self.this_year))
+        TransactionCorrection.objects.create(original=fixed, amount=Decimal("12.49"), payer=self.ola,
+                                             recipient=self.shop, description="x", date=self.d(self.this_year - 1),
+                                             reason="typo", created_by=self.jan)
+        gone = self.make("99.00", self.jan, self.shop, self.d(self.this_year))
+        TransactionCorrection.objects.create(original=gone, amount=gone.amount, payer=self.jan, recipient=self.shop,
+                                             description="x", date=gone.date, reason="never", created_by=self.jan,
+                                             cancelled=True)
+        s = self.summaries()
+        self.assertEqual(s[self.this_year].total, 0)  # moved to last year, the other one cancelled
+        self.assertEqual(self.row(s[self.this_year - 1], self.ola).purchases, Decimal("12.49"))
+        self.assertEqual(self.row(s[self.this_year - 1], self.jan).purchases, 0)
+
+    def test_all_time_per_member_from_their_first_transaction(self):
+        from datetime import date
+        from unittest import mock
+
+        from .models import TransactionCorrection
+
+        self.make("1200.00", self.jan, self.shop, date(2030, 1, 20))
+        self.make("100.00", self.jan, self.shop, date(2029, 12, 5))  # jan's first: December 2029
+        self.make("30.00", self.ola, self.shop, date(2030, 9, 15))  # ola's first: September 2030
+        self.make("5.00", self.jan, self.ola, date(2030, 10, 1))  # a later repayment doesn't move it
+        gone = self.make("999.00", self.ola, self.shop, date(2029, 1, 1))  # cancelled: doesn't count at all
+        TransactionCorrection.objects.create(original=gone, amount=gone.amount, payer=self.ola, recipient=self.shop,
+                                             description="x", date=gone.date, reason="never", created_by=self.jan,
+                                             cancelled=True)
+        self.make("40.00", self.ewa, self.ola, date(2030, 11, 9))  # the latest transaction in the app
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2030, 11, 9)):
+            response = self.client.get(self.url)
+        s = response.context["all_time"]
+        jan, ola, ewa = self.row(s, self.jan), self.row(s, self.ola), self.row(s, self.ewa)
+        # Months = complete months from their own first transaction to 09/11/30.
+        self.assertEqual((jan.first_date, jan.months, jan.purchases), (date(2029, 12, 5), 11, Decimal("1300.00")))
+        self.assertEqual((ola.first_date, ola.months, ola.purchases), (date(2030, 9, 15), 1, Decimal("30.00")))
+        self.assertEqual((ewa.first_date, ewa.months), (date(2030, 11, 9), 0))
+        self.assertEqual((jan.paid, ola.received), (Decimal("5.00"), Decimal("45.00")))  # 5 from jan, 40 from ewa
+        # Net out of pocket: purchases − returns + paid − received.
+        self.assertEqual((jan.total_spent, ola.total_spent, ewa.total_spent),
+                         (Decimal("1305.00"), Decimal("-15.00"), Decimal("40.00")))
+        self.assertEqual(s.total_spent, Decimal("1330.00"))  # = purchases − returns overall
+        # Per month = ROUND(ABS(total spent) / months; 2), "–" before a complete month.
+        self.assertEqual(jan.per_month, Decimal("118.64"))  # 1305 ÷ 11
+        self.assertEqual(ola.per_month, Decimal("15.00"))  # |−15| ÷ 1
+        self.assertIsNone(ewa.per_month)
+        html = response.content.decode()
+        headers = html[html.index("<thead>"):html.index("</thead>")]  # the all-time table comes first
+        self.assertLess(headers.index("Received from members"), headers.index(">Per month<"))
+        self.assertLess(headers.index(">Per month<"), headers.index(">Total spent<"))  # total spent is last
+        self.assertTrue(headers.rstrip().endswith("Total spent</th></tr>"))
+        self.assertContains(response, "118,64\xa0zł")
+        self.assertEqual(s.total, Decimal("1375.00"))
+        self.assertEqual(s.total, self.client.get(reverse("transactions")).context["total"])
+
+    def test_complete_months_like_excel_datedif(self):
+        from datetime import date
+
+        from .summary import complete_months
+
+        for start, end, months in ((date(2024, 10, 7), date(2024, 11, 6), 0), (date(2024, 10, 7), date(2024, 11, 7), 1),
+                                   (date(2024, 1, 31), date(2024, 2, 29), 0), (date(2024, 10, 7), date(2026, 11, 9), 25),
+                                   (date(2024, 10, 7), date(2024, 10, 7), 0)):
+            self.assertEqual(complete_months(start, end), months, (start, end))
+
+    def test_member_without_transactions(self):
+        response = self.client.get(self.url)
+        ewa = self.row(response.context["all_time"], self.ewa)
+        self.assertEqual((ewa.first_date, ewa.per_month), (None, None))
+        self.assertContains(response, "no transactions yet")
+
+    def test_year_boundary(self):
+        from datetime import date
+        from unittest import mock
+
+        self.make("1.00", self.jan, self.shop, date(2030, 12, 31))
+        self.make("2.00", self.jan, self.shop, date(2031, 1, 1))
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2030, 12, 31)):
+            s = self.summaries()
+            self.assertEqual((s[2030].total, s[2029].total), (Decimal("1.00"), 0))
+        with mock.patch("django.utils.timezone.localdate", return_value=date(2031, 1, 1)):
+            s = self.summaries()  # 2030 doesn't disappear on 1 January – it's now last year
+            self.assertEqual((s[2031].total, s[2030].total), (Decimal("2.00"), Decimal("1.00")))
