@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Yearly summary · SheetBase{% endblock %}
+
+{% block extra_head %}
+<style>
+  main { max-width: 1100px; }  /* same as the Transactions page; fits the all-time table's 9 columns */
+  h1 { font-size: 1.4rem; }
+  h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
+  th { background: #f3f4f7; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .zero { color: #bbb; }
+  tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
+  .totals { margin: .6rem 0 0; }
+  h3 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
+  /* Each period has its own soft colour, so it's clear which year a table belongs to. */
+  .period { border-radius: 10px; border-left: 6px solid; padding: .3rem 1.2rem 1.2rem; margin: 1.5rem 0; }
+  .period h2 { margin-top: .9rem; }
+  .all-time { background: #eef2fb; border-color: #5b78c7; }
+  .this-year { background: #ecf7ef; border-color: #4f9d69; }
+  .last-year { background: #fbf4e6; border-color: #c99a3c; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <h1>Yearly summary</h1>
+  <p class="muted">Done transactions only, with corrections applied; cancelled ones don't count.</p>
+
+  {% with s=all_time %}
+  <section class="period all-time">
+    <h2>All time</h2>
+    <p class="muted">Each member counted from their own first transaction. Months = complete months from then to the
+      latest transaction in the app. Per month = |total spent| ÷ months, shown once a full month has passed.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Member</th><th>Since</th><th class="num" title="Complete months from their first transaction to the latest one">Months</th><th class="num">Purchases</th>
+              <th class="num">Returns</th><th class="num">Paid to members</th><th class="num">Received from members</th>
+              <th class="num" title="|Total spent| ÷ months, rounded to grosze">Per month</th>
+              <th class="num" title="Purchases − returns + paid to members − received from members">Total spent</th></tr>
+        </thead>
+        <tbody>
+          {% for r in s.rows %}
+            <tr>
+              <td>{{ r.member }}</td>
+              {% if r.first_date %}
+                <td>{{ r.first_date|date:"d/m/y" }}</td><td class="num">{{ r.months }}</td>
+              {% else %}
+                <td class="zero" colspan="2">no transactions yet</td>
+              {% endif %}
+              <td class="num{% if not r.purchases %} zero{% endif %}">{{ r.purchases|zl }}</td>
+              <td class="num{% if not r.returns %} zero{% endif %}">{{ r.returns|zl }}</td>
+              <td class="num{% if not r.paid %} zero{% endif %}">{{ r.paid|zl }}</td>
+              <td class="num{% if not r.received %} zero{% endif %}">{{ r.received|zl }}</td>
+              <td class="num{% if not r.per_month %} zero{% endif %}">{% if r.per_month is not None %}{{ r.per_month|zl }}{% else %}–{% endif %}</td>
+              <td class="num{% if not r.total_spent %} zero{% endif %}"><strong>{{ r.total_spent|zl }}</strong></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td colspan="3">Total</td><td class="num">{{ s.purchases|zl }}</td>
+              <td class="num">{{ s.returns|zl }}</td><td class="num">{{ s.paid|zl }}</td><td class="num">{{ s.received|zl }}</td>
+              <td></td><td class="num">{{ s.total_spent|zl }}</td></tr>
+        </tfoot>
+      </table>
+    </div>
+    <p class="totals">All transactions so far: <strong>{{ s.total|zl }}</strong>
+      (<a href="{% url 'transactions' %}">see them in the history</a>)</p>
+  </section>
+  {% endwith %}
+
+  {% for s in summaries %}
+  <section class="period {% if forloop.first %}this-year{% else %}last-year{% endif %}">
+    <h2>{{ s.year }}{% if forloop.first %} (this year){% else %} (last year){% endif %}</h2>
+    <h3>Shops in {{ s.year }}</h3>
+    {% if s.shop_rows %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Shop</th><th class="num">Bought from it</th><th class="num">Returned by it</th></tr></thead>
+          <tbody>
+            {% for r in s.shop_rows %}
+              <tr>
+                <td>{{ r.shop }}</td>
+                <td class="num{% if not r.sold %} zero{% endif %}">{{ r.sold|zl }}</td>
+                <td class="num{% if not r.returned %} zero{% endif %}">{{ r.returned|zl }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot><tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td></tr></tfoot>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No purchases from shops in {{ s.year }}.</p>
+    {% endif %}
+    <h3>Members in {{ s.year }}</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Member</th><th class="num">Purchases</th><th class="num">Returns</th>
+              <th class="num">Paid to members</th><th class="num">Received from members</th></tr>
+        </thead>
+        <tbody>
+          {% for r in s.rows %}
+            <tr>
+              <td>{{ r.member }}</td>
+              <td class="num{% if not r.purchases %} zero{% endif %}">{{ r.purchases|zl }}</td>
+              <td class="num{% if not r.returns %} zero{% endif %}">{{ r.returns|zl }}</td>
+              <td class="num{% if not r.paid %} zero{% endif %}">{{ r.paid|zl }}</td>
+              <td class="num{% if not r.received %} zero{% endif %}">{{ r.received|zl }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td>
+              <td class="num">{{ s.paid|zl }}</td><td class="num">{{ s.received|zl }}</td></tr>
+        </tfoot>
+      </table>
+    </div>
+    <p class="totals">
+      Purchases in {{ s.year }}: <strong>{{ s.purchases|zl }}</strong> ·
+      all transactions: <strong>{{ s.total|zl }}</strong>
+      (<a href="{% url 'transactions' %}?year={{ s.year }}">see them in the history</a>)
+    </p>
+  </section>
+  {% endfor %}
+{% endblock %}

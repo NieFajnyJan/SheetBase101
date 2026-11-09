@@ -34,6 +34,7 @@
     <a class="brand" href="{% url 'home' %}">SheetBase</a>
     {% if user.is_authenticated %}
       <a href="{% url 'transactions' %}">Transactions</a>
+      <a href="{% url 'summary' %}">Summary</a>
       {% if user.is_staff %}<a href="{% url 'admin:index' %}">Admin</a>{% endif %}
       <span>{{ user }}</span>
       <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Log out</button></form>
