@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}{% if cancelling %}Cancel{% else %}Correct{% endif %} transaction · SheetBase{% endblock %}
+
+{% block extra_head %}{% include "sheetapp/_datepicker.html" %}{% endblock %}
+
+{% block content %}
+  {% with c=transaction.current %}
+  <form class="card" method="post">
+    {% csrf_token %}
+    {% if cancelling %}
+      <h2>Cancel transaction</h2>
+      <p><strong>{{ c.date|date:"d/m/y" }} · {{ c.payer }} → {{ c.recipient }} · {{ c.description }} · {{ c.amount|zl }}</strong></p>
+      <p class="muted">It stays in the history, marked “Cancelled”, and stops counting towards totals.
+        It can't be un-cancelled – add a new transaction instead.</p>
+    {% else %}
+      <h2>Correct transaction</h2>
+      <p class="muted">Change whatever was wrong. The original stays in the history.</p>
+    {% endif %}
+    {{ form.as_p }}
+    <button class="btn">{% if cancelling %}Cancel transaction{% else %}Save correction{% endif %}</button>
+    <a href="{% url 'transactions' %}">Back</a>
+  </form>
+  {% endwith %}
+{% endblock %}

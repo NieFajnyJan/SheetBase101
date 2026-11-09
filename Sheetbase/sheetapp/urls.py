@@ -9,4 +9,6 @@ urlpatterns = [
     path("accounts/login/", views.login_page, name="login"),
     path("accounts/logout/", LogoutView.as_view(), name="logout"),
     path("transactions/", views.transactions, name="transactions"),
+    path("transactions/<int:pk>/correct/", views.correct_transaction, name="correct_transaction"),
+    path("transactions/<int:pk>/cancel/", views.cancel_transaction, name="cancel_transaction"),
 ]

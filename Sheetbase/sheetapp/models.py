@@ -4,7 +4,10 @@ from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
 from django.db import models
+from django.db.models import Case, F, OuterRef, Subquery, Value, When
+from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.functional import cached_property
 
 
 # Shops are users with is_shop=True that can't log in; purchases are paid to them.
@@ -45,9 +48,35 @@ class User(AbstractUser):
         return self.get_full_name() or self.username
 
 
+# The fields a correction can change, in the order they're shown.
+CORRECTABLE_FIELDS = ["amount", "payer", "recipient", "description", "date"]
+
+
+class TransactionQuerySet(models.QuerySet):
+    def with_current(self):
+        """Annotates each transaction with its *current* values (cur_amount, cur_payer, ...):
+        those of its latest correction, or its own when it has none. cur_counted is what it adds
+        to a total – 0 once cancelled. Filter, sort and sum on these, never on the original fields."""
+        latest = TransactionCorrection.objects.filter(original=OuterRef("pk")).order_by("-created_at", "-pk")
+
+        def current(field, output_field=None):
+            return Coalesce(Subquery(latest.values(field)[:1]), F(field), output_field=output_field)
+
+        return self.annotate(
+            cur_amount=current("amount"),
+            cur_payer=current("payer_id", models.BigIntegerField()),  # a user's pk
+            cur_recipient=current("recipient_id", models.BigIntegerField()),
+            cur_date=current("date"),
+            cur_cancelled=Coalesce(Subquery(latest.values("cancelled")[:1]), Value(False)),
+        ).annotate(
+            cur_counted=Case(When(cur_cancelled=True, then=Value(Decimal("0.00"))), default=F("cur_amount"),
+                             output_field=models.DecimalField(max_digits=10, decimal_places=2)),
+        )
+
+
 class Transaction(models.Model):
     """A done transaction: a real payment that already happened – who paid whom, how much,
-    for what and when."""
+    for what and when. It's final; mistakes are fixed with a TransactionCorrection (#22)."""
 
     # DecimalField, never float: amounts must be exact to the grosz.
     amount = models.DecimalField(
@@ -71,6 +100,8 @@ class Transaction(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True)
 
+    objects = TransactionQuerySet.as_manager()
+
     class Meta:
         ordering = ["-date", "-created_at"]
         constraints = [
@@ -93,3 +124,86 @@ class Transaction(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("A done transaction can't be deleted.")
+
+    # --- Corrections (#22). Prefetch "corrections" when listing many transactions.
+    @cached_property
+    def versions(self):
+        """Every version, newest first: the corrections, then this original."""
+        return [*self.corrections.all(), self]
+
+    @property
+    def current(self):
+        """The version that counts: the latest correction, or the original."""
+        return self.versions[0]
+
+    @property
+    def is_cancelled(self):
+        return self.current is not self and self.current.cancelled
+
+    @property
+    def is_corrected(self):
+        return len(self.versions) > 1
+
+    def can_be_corrected_by(self, user):
+        """Only whoever added the transaction can correct or cancel it, and not once it's cancelled."""
+        return user.pk == self.created_by_id and not self.is_cancelled
+
+    def history(self):
+        """For each correction, newest first: what changed compared with the version before it
+        (field label, old, new)."""
+        oldest_first = self.versions[::-1]
+        entries = []
+        for before, after in zip(oldest_first, oldest_first[1:]):
+            changes = [
+                (TransactionCorrection._meta.get_field(f).verbose_name.removesuffix(" (zł)"),
+                 getattr(before, f), getattr(after, f))
+                for f in CORRECTABLE_FIELDS if getattr(before, f) != getattr(after, f)
+            ]
+            entries.append({"correction": after, "changes": changes})
+        return entries[::-1]
+
+
+class TransactionCorrection(models.Model):
+    """A new version of a done transaction (#22). The original is never changed; the latest
+    correction wins. A cancellation keeps the values it cancels but counts as 0 zł.
+    Final like Transaction: it can only be followed by another correction."""
+
+    original = models.ForeignKey(Transaction, on_delete=models.PROTECT, related_name="corrections")
+    amount = models.DecimalField(
+        "amount (zł)", max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    payer = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+", verbose_name="paid by")
+    recipient = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+", verbose_name="paid to")
+    description = models.CharField(max_length=255, help_text="What was bought.")
+    date = models.DateField("date paid", validators=[validate_transaction_date])
+    cancelled = models.BooleanField(default=False)
+    reason = models.CharField(max_length=255, help_text="Why it's being corrected.")
+    created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+", editable=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at", "-pk"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(payer=models.F("recipient")),
+                name="correction_payer_is_not_recipient",
+                violation_error_message="“Paid by” and “paid to” must be different people.",
+            ),
+        ]
+
+    def __str__(self):
+        what = "Cancelled" if self.cancelled else "Corrected"
+        return f"{what}: {self.date:%d/%m/%y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
+
+    def clean(self):
+        # A cancelled transaction stays cancelled – record a new one instead.
+        if self.original_id and self.original.corrections.filter(cancelled=True).exclude(pk=self.pk).exists():
+            raise ValidationError("This transaction is cancelled and can't be corrected any more.")
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise ValueError("A correction can't be edited.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise ValueError("A correction can't be deleted.")

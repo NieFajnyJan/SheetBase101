@@ -551,3 +551,171 @@ class PayerIsNotRecipientTests(TestCase):
             "description": "x", "date": today().isoformat()})
         self.assertContains(response, "must be different people")
         self.assertFalse(Transaction.objects.exists())
+
+
+# --------------------------------------------------------------------------- Corrections (#22)
+from .models import TransactionCorrection
+
+
+class CorrectionTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")  # added the transaction
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.t = Transaction.objects.create(amount=Decimal("124.90"), payer=self.jan, recipient=self.shop,
+                                            created_by=self.jan, description="Kawa", date=today())
+        self.list_url = reverse("transactions")
+        self.correct_url = reverse("correct_transaction", args=[self.t.pk])
+        self.cancel_url = reverse("cancel_transaction", args=[self.t.pk])
+        self.client.force_login(self.jan)
+
+    def correct(self, **fields):
+        data = {"amount": "124.90", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "Kawa",
+                "date": today().strftime("%d/%m/%y"), "reason": "typo"}
+        return self.client.post(self.correct_url, {**data, **fields})
+
+    def total(self, **params):
+        return self.client.get(self.list_url, params).context["total"]
+
+    def row(self):
+        return Transaction.objects.prefetch_related("corrections").get()
+
+    def test_logged_out_goes_to_login(self):
+        self.client.logout()
+        for url in (self.correct_url, self.cancel_url):
+            self.assertRedirects(self.client.get(url), f"{reverse('login')}?next={url}", fetch_redirect_response=False)
+
+    def test_correction_changes_row_and_total_but_not_original(self):
+        self.assertRedirects(self.correct(amount="12,49"), self.list_url)
+        self.assertEqual(self.total(), Decimal("12.49"))
+        self.assertEqual(self.row().current.amount, Decimal("12.49"))
+        self.assertEqual(Transaction.objects.get().amount, Decimal("124.90"))  # original untouched
+        self.assertContains(self.client.get(self.list_url), "corrected ×1")
+
+    def test_latest_correction_wins(self):
+        self.correct(amount="12.49")
+        self.correct(amount="13.00")
+        self.assertEqual(self.total(), Decimal("13.00"))
+
+    def test_any_field_can_change_and_filters_follow(self):
+        from datetime import date
+
+        last_year = date(today().year - 1, 6, 15)
+        self.correct(payer=self.ola.pk, recipient=self.jan.pk, description="Herbata",
+                     date=last_year.strftime("%d/%m/%y"))
+        c = self.row().current
+        self.assertEqual((c.payer, c.recipient, c.description, c.date), (self.ola, self.jan, "Herbata", last_year))
+        self.assertEqual(self.total(payer=self.jan.pk), 0)
+        self.assertEqual(self.total(payer=self.ola.pk), Decimal("124.90"))
+        self.assertEqual(self.total(recipient=self.shop.pk), 0)
+        self.assertEqual(self.total(year=today().year), 0)  # moved to the corrected year
+        self.assertEqual(self.total(year=last_year.year), Decimal("124.90"))
+
+    def test_form_prefilled_with_current_values(self):
+        self.correct(amount="12.49")
+        form = self.client.get(self.correct_url).context["form"]
+        self.assertEqual(form["amount"].value(), Decimal("12.49"))
+        self.assertEqual(form["payer"].value(), self.jan.pk)
+
+    def test_reason_required(self):
+        response = self.correct(amount="12.49", reason="")
+        self.assertTrue(response.context["form"].errors["reason"])
+        self.assertFalse(TransactionCorrection.objects.exists())
+
+    def test_nothing_changed_rejected(self):
+        self.assertContains(self.correct(), "Nothing was changed")
+        self.assertFalse(TransactionCorrection.objects.exists())
+
+    def test_same_validation_as_add_form(self):
+        from datetime import timedelta
+
+        too_old = today().replace(year=today().year - 3)
+        for fields in ({"amount": "0"}, {"amount": "1.005"}, {"recipient": self.jan.pk},
+                       {"date": too_old.strftime("%d/%m/%y")},
+                       {"date": (today() + timedelta(days=1)).strftime("%d/%m/%y")}):
+            self.assertEqual(self.correct(**fields).status_code, 200, fields)
+        self.assertFalse(TransactionCorrection.objects.exists())
+
+    def test_only_author_can_correct_or_cancel(self):
+        self.client.force_login(self.ola)
+        self.assertEqual(self.client.get(self.correct_url).status_code, 403)
+        self.assertEqual(self.correct(amount="1.00").status_code, 403)
+        self.assertEqual(self.client.post(self.cancel_url, {"reason": "x"}).status_code, 403)
+        self.assertNotContains(self.client.get(self.list_url), self.correct_url)
+        self.assertFalse(TransactionCorrection.objects.exists())
+        self.client.force_login(self.jan)
+        self.assertContains(self.client.get(self.list_url), self.correct_url)
+
+    def test_cancel(self):
+        self.assertEqual(self.client.post(self.cancel_url, {"reason": ""}).status_code, 200)  # reason required
+        self.assertFalse(TransactionCorrection.objects.exists())
+
+        self.assertRedirects(self.client.post(self.cancel_url, {"reason": "never happened"}), self.list_url)
+        self.assertEqual(self.total(), 0)
+        t = self.row()
+        self.assertTrue(t.is_cancelled)
+        self.assertEqual((t.current.amount, t.current.description), (Decimal("124.90"), "Kawa"))  # values kept
+        page = self.client.get(self.list_url)
+        self.assertContains(page, "Cancelled by jan")
+        self.assertNotContains(page, self.correct_url)  # no more Correct / Cancel
+
+    def test_hide_cancelled_filter(self):
+        kept = Transaction.objects.create(amount=Decimal("5.00"), payer=self.jan, recipient=self.shop,
+                                          created_by=self.jan, description="Herbata", date=today())
+        self.client.post(self.cancel_url, {"reason": "never happened"})
+
+        shown = lambda **p: [t.pk for t in self.client.get(self.list_url, p).context["transactions"]]
+        self.assertCountEqual(shown(), [self.t.pk, kept.pk])  # cancelled ones show by default
+        self.assertEqual(shown(hide_cancelled="on"), [kept.pk])
+        self.assertContains(self.client.get(self.list_url), 'name="hide_cancelled"')
+
+    def test_cancelled_cannot_be_corrected_or_uncancelled(self):
+        self.client.post(self.cancel_url, {"reason": "never happened"})
+        self.assertEqual(self.correct(amount="1.00").status_code, 403)
+        self.assertEqual(self.client.post(self.cancel_url, {"reason": "again"}).status_code, 403)
+        c = TransactionCorrection(original=self.t, amount=Decimal("1.00"), payer=self.jan, recipient=self.shop,
+                                  description="x", date=today(), reason="undo", created_by=self.jan)
+        with self.assertRaises(ValidationError):
+            c.full_clean()
+
+    def test_corrections_are_final(self):
+        self.correct(amount="12.49")
+        c = TransactionCorrection.objects.get()
+        c.amount = Decimal("1.00")
+        with self.assertRaises(ValueError):
+            c.save()
+        with self.assertRaises(ValueError):
+            c.delete()
+        self.assertEqual(TransactionCorrection.objects.get().amount, Decimal("12.49"))
+
+    def test_history_newest_first_with_original_last(self):
+        self.correct(amount="12.49", reason="first fix")
+        self.correct(description="Kawa i mleko", amount="12.49", reason="second fix")
+        history = self.row().history()
+        self.assertEqual([e["correction"].reason for e in history], ["second fix", "first fix"])
+        self.assertEqual(history[1]["changes"], [("amount", Decimal("124.90"), Decimal("12.49"))])
+
+        page = self.client.get(self.list_url).content.decode()
+        self.assertLess(page.index("second fix"), page.index("first fix"))
+        self.assertLess(page.index("first fix"), page.index("Original"))
+        self.assertIn("124,90\xa0zł → 12,49\xa0zł", page)
+        self.assertIn("Corrected by jan", page)
+        self.assertNotIn("difference", page)
+
+    def test_admin_shows_and_adds_corrections(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        response = self.client.post(reverse("admin:sheetapp_transactioncorrection_add"), {
+            "original": self.t.pk, "amount": "12.49", "payer": self.jan.pk, "recipient": self.shop.pk,
+            "description": "Kawa", "date": today().isoformat(), "reason": "fixed by admin"})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(TransactionCorrection.objects.get().created_by, boss)
+        change_url = reverse("admin:sheetapp_transaction_change", args=[self.t.pk])
+        self.assertContains(self.client.get(change_url), "fixed by admin")
+        # "original" is a search box: typing part of the description finds the transaction.
+        found = self.client.get(reverse("admin:autocomplete"), {
+            "term": "Kaw", "app_label": "sheetapp", "model_name": "transactioncorrection", "field_name": "original"})
+        self.assertEqual([r["id"] for r in found.json()["results"]], [str(self.t.pk)])
+        c = TransactionCorrection.objects.get()
+        delete_url = reverse("admin:sheetapp_transactioncorrection_delete", args=[c.pk])
+        self.assertEqual(self.client.post(delete_url, {"post": "yes"}).status_code, 403)
