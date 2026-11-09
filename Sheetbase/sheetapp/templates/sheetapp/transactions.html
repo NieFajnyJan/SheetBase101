@@ -4,20 +4,7 @@
 {% block title %}Transactions · SheetBase{% endblock %}
 
 {% block extra_head %}
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
-<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
-<script>
-  // Calendar for "date paid" in dd/mm/yy. Same limits as the server: not in the future, max 2 years back.
-  document.addEventListener("DOMContentLoaded", () => {
-    if (!window.flatpickr) return;  // no CDN -> the text box still works
-    const twoYearsBack = new Date();
-    twoYearsBack.setFullYear(twoYearsBack.getFullYear() - 2);
-    flatpickr(".datepicker", {
-      dateFormat: "d/m/y", allowInput: true, maxDate: "today", minDate: twoYearsBack,
-      locale: { firstDayOfWeek: 1 },
-    });
-  });
-</script>
+{% include "sheetapp/_datepicker.html" %}
 <style>
   main { max-width: 1100px; }
   .card h2 { margin-top: 0; font-size: 1.15rem; }
@@ -35,6 +22,7 @@
   h2.section { margin: 2rem 0 .5rem; }
   .filters { display: flex; flex-wrap: wrap; gap: .8rem; align-items: end; margin-bottom: 1rem; }
   .card.filters p { margin: 0; min-width: 150px; }
+  .filters .toggle { display: flex; align-items: center; gap: .4rem; font-weight: 400; margin: 0; padding-bottom: .55rem; cursor: pointer; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
   th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
@@ -42,6 +30,18 @@
   th { background: #f3f4f7; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
   tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
+  /* Corrections (#22) */
+  .tag { border: 0; border-radius: 10px; padding: .05rem .5rem; font: inherit; font-size: .8rem; background: #e8ecf5; color: #2b3a55; }
+  button.tag { cursor: pointer; }
+  .tag-cancelled { background: #fde8ea; color: #b00020; }
+  tr.has-history { cursor: pointer; }
+  tr.cancelled td.val { text-decoration: line-through; color: #888; }
+  td.actions a { margin-right: .6rem; }
+  tr.history > td { background: #f8f9fc; white-space: normal; }
+  .history ol { list-style: none; margin: 0; padding: 0; }
+  .history li { padding: .4rem 0; border-bottom: 1px dashed #dde; }
+  .history li:last-child { border-bottom: 0; }
+  .history .who { color: #777; font-size: .85rem; }
 </style>
 {% endblock %}
 
@@ -70,24 +70,56 @@
   <h2 class="section">Done transactions</h2>
 
   <form class="card filters" method="get">
-    {{ filter_form.as_p }}
+    {% for field in filter_form %}{% if field.name != "hide_cancelled" %}
+      <p>{{ field.label_tag }} {{ field }}{{ field.errors }}</p>
+    {% endif %}{% endfor %}
     <button class="btn">Filter</button>
+    {# Applies straight away – no need to press Filter. #}
+    <label class="toggle">{{ filter_form.hide_cancelled }} Hide cancelled</label>
     {% if filtered %}<a href="{% url 'transactions' %}">Clear</a>{% endif %}
   </form>
 
   {% if transactions %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date paid</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th><th>Added</th></tr></thead>
+        <thead><tr><th>Date paid</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th><th>Added</th><th></th></tr></thead>
         <tbody>
           {% for t in transactions %}
-            <tr>
-              <td>{{ t.date|date:"d/m/y" }}</td><td>{{ t.payer }}</td><td>{{ t.recipient }}</td><td class="desc">{{ t.description }}</td>
-              <td class="num">{{ t.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|date:"d/m/y" }}</td>
+            {% with c=t.current %}
+            <tr class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
+                {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
+              <td class="val">{{ c.date|date:"d/m/y" }}</td><td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
+              <td class="desc"><span class="val">{{ c.description }}</span>
+                {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}">Cancelled</button>
+                {% elif t.is_corrected %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}">corrected ×{{ t.corrections.all|length }}</button>{% endif %}
+              </td>
+              <td class="num val">{{ c.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|date:"d/m/y" }}</td>
+              <td class="actions">{% if t|correctable_by:user %}<a href="{% url 'correct_transaction' t.pk %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}">Cancel</a>{% endif %}</td>
             </tr>
+            {% if t.is_corrected %}
+              <tr class="history" id="history-{{ t.pk }}" hidden>
+                <td colspan="8">
+                  <ol>
+                    {% for e in t.history %}
+                      <li>
+                        <strong>{% if e.correction.cancelled %}Cancelled{% else %}Corrected{% endif %} by {{ e.correction.created_by }}</strong>
+                        {% for label, old, new in e.changes %}· {{ label }}: {{ old|show }} → {{ new|show }} {% endfor %}
+                        <div>Reason: {{ e.correction.reason }}</div>
+                        <div class="who">{{ e.correction.created_at|date:"d/m/y H:i" }}</div>
+                      </li>
+                    {% endfor %}
+                    <li>
+                      <strong>Original</strong> · {{ t.date|date:"d/m/y" }} · {{ t.payer }} → {{ t.recipient }} · {{ t.description }} · {{ t.amount|zl }}
+                      <div class="who">added by {{ t.created_by }}, {{ t.created_at|date:"d/m/y H:i" }}</div>
+                    </li>
+                  </ol>
+                </td>
+              </tr>
+            {% endif %}
+            {% endwith %}
           {% endfor %}
         </tbody>
-        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td colspan="2"></td></tr></tfoot>
+        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td colspan="3"></td></tr></tfoot>
       </table>
     </div>
   {% elif filtered %}
@@ -95,4 +127,16 @@
   {% else %}
     <p class="card muted">No transactions yet – add the first one above.</p>
   {% endif %}
+  <script>
+    document.getElementById("id_hide_cancelled").addEventListener("change", e => e.target.form.submit());
+
+    // Clicking a corrected transaction shows / hides its history of corrections under it.
+    document.querySelectorAll("tr.has-history").forEach(row => {
+      row.addEventListener("click", e => {
+        if (e.target.closest("a")) return;  // Correct / Cancel links work as normal
+        const history = document.getElementById(row.dataset.history);
+        history.hidden = !history.hidden;
+      });
+    });
+  </script>
 {% endblock %}

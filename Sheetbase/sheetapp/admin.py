@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Transaction, User
+from .models import Transaction, TransactionCorrection, User
 
 
 @admin.register(User)
@@ -27,13 +27,34 @@ class UserAdmin(BaseUserAdmin):
     )
 
 
+class CorrectionInline(admin.TabularInline):
+    """A transaction's corrections, newest first – shown, never changed here."""
+
+    model = TransactionCorrection
+    fk_name = "original"
+    extra = 0
+    fields = ("created_at", "created_by", "cancelled", "amount", "payer", "recipient", "description", "date", "reason")
+    readonly_fields = fields
+    can_delete = False
+
+    def has_add_permission(self, request, obj=None):
+        return False  # added from the Transaction corrections page instead
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 @admin.register(Transaction)
 class TransactionAdmin(admin.ModelAdmin):
+    inlines = [CorrectionInline]
     list_display = ("date", "description", "amount", "payer", "recipient", "created_by", "created_at")
     list_filter = ("payer", "recipient", "date")
-    search_fields = ("description",)
+    search_fields = ("description",)  # also powers the "original" search box on corrections
     date_hierarchy = "date"
     readonly_fields = ("created_by", "created_at")
+
+    def get_inlines(self, request, obj):
+        return self.inlines if obj else []  # a new transaction has no corrections yet
 
     # Done transactions can be added and viewed, never edited or deleted.
     def has_change_permission(self, request, obj=None):
@@ -44,5 +65,27 @@ class TransactionAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         # Whoever adds the entry in the admin is recorded as its author.
+        obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+@admin.register(TransactionCorrection)
+class TransactionCorrectionAdmin(admin.ModelAdmin):
+    """Staff can add corrections here for any transaction (on the site only its author can).
+    Like transactions, corrections are final: never edited or deleted."""
+
+    list_display = ("created_at", "original", "cancelled", "amount", "payer", "recipient", "date", "created_by", "reason")
+    list_filter = ("cancelled",)
+    search_fields = ("description", "reason", "original__description")
+    autocomplete_fields = ("original",)  # search box: type part of the description
+    readonly_fields = ("created_by", "created_at")
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+    def save_model(self, request, obj, form, change):
         obj.created_by = request.user
         super().save_model(request, obj, form, change)

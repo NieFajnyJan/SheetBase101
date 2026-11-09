@@ -1,11 +1,19 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.db.models import Sum
-from django.shortcuts import redirect, render
+from django.core.exceptions import PermissionDenied
+from django.db.models import Prefetch, Sum
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET
 
-from .forms import HistoryFilterForm, ShopForm, TransactionForm
-from .models import Transaction
+from .forms import CancelForm, CorrectionForm, HistoryFilterForm, ShopForm, TransactionForm
+from .models import Transaction, TransactionCorrection
+
+
+def transactions_with_history():
+    """Done transactions with their current values annotated and every version prefetched."""
+    return Transaction.objects.with_current().select_related("payer", "recipient", "created_by").prefetch_related(
+        Prefetch("corrections", queryset=TransactionCorrection.objects.select_related(
+            "payer", "recipient", "created_by")))
 
 
 def home(request):
@@ -42,7 +50,7 @@ def transactions(request):
             return redirect(request.get_full_path())
 
     filter_form = HistoryFilterForm(request.GET)
-    done = Transaction.objects.select_related("payer", "recipient", "created_by")
+    done = transactions_with_history().order_by("-cur_date", "-created_at")
     if filter_form.is_valid():
         done = filter_form.filter(done)
     return render(request, "sheetapp/transactions.html", {
@@ -51,5 +59,39 @@ def transactions(request):
         "filter_form": filter_form,
         "filtered": any(request.GET.get(f) for f in filter_form.fields),
         "transactions": done,
-        "total": done.aggregate(t=Sum("amount"))["t"] or 0,
+        "total": done.aggregate(t=Sum("cur_counted"))["t"] or 0,  # corrected amounts; cancelled count 0
     })
+
+
+def own_transaction(request, pk):
+    """The transaction, if the logged-in user may correct it (#22); otherwise 403."""
+    transaction = get_object_or_404(transactions_with_history(), pk=pk)
+    if not transaction.can_be_corrected_by(request.user):
+        raise PermissionDenied("Only whoever added a transaction can correct it, and not once it's cancelled.")
+    return transaction
+
+
+@login_required
+def correct_transaction(request, pk):
+    transaction = own_transaction(request, pk)
+    form = CorrectionForm(request.POST or None, original=transaction)
+    if request.method == "POST" and form.is_valid():
+        correction = form.save(commit=False)
+        correction.created_by = request.user
+        correction.save()
+        messages.success(request, str(correction))
+        return redirect("transactions")
+    return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": False})
+
+
+@login_required
+def cancel_transaction(request, pk):
+    transaction = own_transaction(request, pk)
+    form = CancelForm(request.POST or None, original=transaction)
+    if request.method == "POST" and form.is_valid():
+        correction = form.save(commit=False)
+        correction.created_by = request.user
+        correction.save()
+        messages.success(request, str(correction))
+        return redirect("transactions")
+    return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": True})

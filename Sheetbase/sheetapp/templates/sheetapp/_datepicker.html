@@ -1,0 +1,15 @@
+{# Calendar for “date paid” fields (class=datepicker). #}
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
+<script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
+<script>
+  // Calendar for "date paid" in dd/mm/yy. Same limits as the server: not in the future, max 2 years back.
+  document.addEventListener("DOMContentLoaded", () => {
+    if (!window.flatpickr) return;  // no CDN -> the text box still works
+    const twoYearsBack = new Date();
+    twoYearsBack.setFullYear(twoYearsBack.getFullYear() - 2);
+    flatpickr(".datepicker", {
+      dateFormat: "d/m/y", allowInput: true, maxDate: "today", minDate: twoYearsBack,
+      locale: { firstDayOfWeek: 1 },
+    });
+  });
+</script>
