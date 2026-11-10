@@ -76,7 +76,7 @@ class TransactionQuerySet(models.QuerySet):
 
 class Transaction(models.Model):
     """A done transaction: a real payment that already happened – who paid whom, how much,
-    for what and when. It's final; mistakes are fixed with a TransactionCorrection (#22)."""
+    for what and when. It's final; mistakes are fixed with a TransactionCorrection."""
 
     # DecimalField, never float: amounts must be exact to the grosz.
     amount = models.DecimalField(
@@ -125,7 +125,7 @@ class Transaction(models.Model):
     def delete(self, *args, **kwargs):
         raise ValueError("A done transaction can't be deleted.")
 
-    # --- Corrections (#22). Prefetch "corrections" when listing many transactions.
+    # --- Corrections. Prefetch "corrections" when listing many transactions.
     @cached_property
     def versions(self):
         """Every version, newest first: the corrections, then this original."""
@@ -164,7 +164,7 @@ class Transaction(models.Model):
 
 
 class TransactionCorrection(models.Model):
-    """A new version of a done transaction (#22). The original is never changed; the latest
+    """A new version of a done transaction. The original is never changed; the latest
     correction wins. A cancellation keeps the values it cancels but counts as 0 zł.
     Final like Transaction: it can only be followed by another correction."""
 
@@ -207,3 +207,89 @@ class TransactionCorrection(models.Model):
 
     def delete(self, *args, **kwargs):
         raise ValueError("A correction can't be deleted.")
+
+
+class PlannedTransactionQuerySet(models.QuerySet):
+    def open(self):
+        """Debts that still count. Use this everywhere debts are added up (balances, who owes whom)."""
+        return self.filter(settled_by__isnull=True)
+
+    def settled(self):
+        return self.filter(settled_by__isnull=False)
+
+
+class PlannedTransaction(models.Model):
+    """A planned transaction: an open debt – who owes whom, how much, for what and since when.
+    No money has moved yet. When it's paid it isn't deleted but marked settled and linked to the
+    done transaction that paid it, so cancelling that payment can reopen it."""
+
+    # Only members: shops never owe or are owed anything.
+    debtor = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="debts", verbose_name="owes",
+        limit_choices_to={"is_shop": False},
+    )
+    creditor = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="credits", verbose_name="owed to",
+        limit_choices_to={"is_shop": False},
+    )
+    amount = models.DecimalField(
+        "amount (zł)", max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
+    )
+    description = models.CharField(max_length=255, help_text="What it's for.")
+    created_by = models.ForeignKey(
+        User, on_delete=models.PROTECT, related_name="created_planned_transactions", editable=False
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Settling. Null = still open.
+    settled_by = models.ForeignKey(
+        Transaction, on_delete=models.PROTECT, null=True, blank=True, editable=False,
+        related_name="settled_debts", verbose_name="settled by payment",
+    )
+    settled_at = models.DateTimeField(null=True, blank=True, editable=False)
+    # Set on a leftover (over- or underpayment) created by a payment.
+    created_by_payment = models.ForeignKey(
+        Transaction, on_delete=models.PROTECT, null=True, blank=True, editable=False,
+        related_name="leftovers", verbose_name="leftover of payment",
+    )
+
+    objects = PlannedTransactionQuerySet.as_manager()
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(debtor=models.F("creditor")),
+                name="planned_debtor_is_not_creditor",
+                violation_error_message="“Owes” and “owed to” must be different people.",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="planned_amount_positive",
+                violation_error_message="The amount must be above 0.",
+            ),
+            # Settled means both: which payment and when.
+            models.CheckConstraint(
+                condition=models.Q(settled_by__isnull=True, settled_at__isnull=True)
+                | models.Q(settled_by__isnull=False, settled_at__isnull=False),
+                name="planned_settled_by_and_at_together",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.debtor} owes {self.creditor} {self.amount} zł – {self.description}"
+
+    @property
+    def is_settled(self):
+        return self.settled_by_id is not None
+
+    # A settled debt is history: it can't be changed or deleted (only reopened when the payment that settled it is cancelled).
+    def save(self, *args, **kwargs):
+        if not self._state.adding and PlannedTransaction.objects.settled().filter(pk=self.pk).exists():
+            raise ValueError("A settled planned transaction can't be edited.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        if self.is_settled:
+            raise ValueError("A settled planned transaction can't be deleted.")
+        return super().delete(*args, **kwargs)

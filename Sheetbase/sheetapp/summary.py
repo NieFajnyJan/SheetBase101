@@ -1,5 +1,5 @@
-"""Summaries (#13): per member, what they spent and paid – for one year, or all time.
-Done transactions only, with their corrected values (#22); cancelled ones don't count."""
+"""Summaries: per member, what they spent and paid – for one year, or all time.
+Done transactions only, with their corrected values; cancelled ones don't count."""
 from dataclasses import dataclass, field
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -28,7 +28,7 @@ class MemberRow:
     @property
     def per_month(self):
         """Like the spreadsheet: =ROUND(ABS(saldo netto) / DATEDIF(first; latest; "M"); 2).
-        Saldo netto here is total_spent – once planned transactions exist (#11), use the real balance.
+        Saldo netto here is total_spent – once planned transactions exist, use the real balance.
         None while there's less than one complete month (Excel would show #DIV/0!)."""
         if not self.months:
             return None

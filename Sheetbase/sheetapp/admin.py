@@ -1,7 +1,7 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
-from .models import Transaction, TransactionCorrection, User
+from .models import PlannedTransaction, Transaction, TransactionCorrection, User
 
 
 @admin.register(User)
@@ -88,4 +88,45 @@ class TransactionCorrectionAdmin(admin.ModelAdmin):
 
     def save_model(self, request, obj, form, change):
         obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+
+class StatusFilter(admin.SimpleListFilter):
+    title = "status"
+    parameter_name = "status"
+
+    def lookups(self, request, model_admin):
+        return [("open", "Open"), ("settled", "Settled")]
+
+    def queryset(self, request, queryset):
+        if self.value() == "open":
+            return queryset.open()
+        if self.value() == "settled":
+            return queryset.settled()
+        return queryset
+
+
+@admin.register(PlannedTransaction)
+class PlannedTransactionAdmin(admin.ModelAdmin):
+    """Open debts. Open ones can be fixed or deleted here; settled ones are history."""
+
+    list_display = ("description", "amount", "debtor", "creditor", "status", "created_by", "created_at")
+    list_filter = (StatusFilter, "debtor", "creditor", "created_at")
+    search_fields = ("description",)
+    date_hierarchy = "created_at"
+    readonly_fields = ("created_by", "created_at", "settled_by", "settled_at", "created_by_payment")
+
+    @admin.display(description="status", ordering="settled_at")
+    def status(self, obj):
+        return "Settled" if obj.is_settled else "Open"
+
+    def has_change_permission(self, request, obj=None):
+        return super().has_change_permission(request, obj) and not (obj and obj.is_settled)
+
+    def has_delete_permission(self, request, obj=None):
+        return super().has_delete_permission(request, obj) and not (obj and obj.is_settled)
+
+    def save_model(self, request, obj, form, change):
+        if not change:
+            obj.created_by = request.user
         super().save_model(request, obj, form, change)
