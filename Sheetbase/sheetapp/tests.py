@@ -553,7 +553,7 @@ class PayerIsNotRecipientTests(TestCase):
         self.assertFalse(Transaction.objects.exists())
 
 
-# --------------------------------------------------------------------------- Corrections (#22)
+# --------------------------------------------------------------------------- Corrections
 from .models import TransactionCorrection
 
 
@@ -721,7 +721,7 @@ class CorrectionTests(TestCase):
         self.assertEqual(self.client.post(delete_url, {"post": "yes"}).status_code, 403)
 
 
-# --------------------------------------------------------------------------- Yearly summary (#13)
+# --------------------------------------------------------------------------- Yearly summary
 class YearlySummaryTests(TestCase):
     def setUp(self):
         from datetime import date
@@ -893,3 +893,166 @@ class YearlySummaryTests(TestCase):
         with mock.patch("django.utils.timezone.localdate", return_value=date(2031, 1, 1)):
             s = self.summaries()  # 2030 doesn't disappear on 1 January – it's now last year
             self.assertEqual((s[2031].total, s[2030].total), (Decimal("2.00"), Decimal("1.00")))
+
+
+# --------------------------------------------------------------------------- Planned transactions
+from django.db import IntegrityError, transaction as db_transaction
+from django.db.models import ProtectedError
+from django.utils import timezone
+
+from .models import PlannedTransaction
+
+
+class PlannedTransactionTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+
+    def build(self, amount="307.09", debtor=None, creditor=None, **fields):
+        return PlannedTransaction(amount=Decimal(amount), debtor=debtor or self.ola, creditor=creditor or self.jan,
+                                  created_by=self.jan, description="Fotel", **fields)
+
+    def make(self, *args, **kwargs):
+        p = self.build(*args, **kwargs)
+        p.save()
+        return p
+
+    def payment(self, amount="307.09"):
+        return Transaction.objects.create(amount=Decimal(amount), payer=self.ola, recipient=self.jan,
+                                          created_by=self.ola, description="Zwrot")
+
+    def settle(self, p, payment):
+        p.settled_by, p.settled_at = payment, timezone.now()
+        p.save()
+
+    def test_amount_is_stored_exactly(self):
+        p = self.make("1842.47")
+        self.assertEqual(PlannedTransaction.objects.get(pk=p.pk).amount, Decimal("1842.47"))
+
+    def test_invalid_values_rejected(self):
+        for p, why in [(self.build(creditor=self.ola), "owes themselves"),
+                       (self.build("0.00"), "zero"), (self.build("-5.00"), "negative"),
+                       (self.build("1.005"), "3 decimal places"),
+                       (self.build(debtor=self.shop), "shop owes"), (self.build(creditor=self.shop), "shop owed")]:
+            with self.assertRaises(ValidationError, msg=why):
+                p.full_clean()
+
+    def test_database_rejects_owing_yourself_and_non_positive_amounts(self):
+        for p in (self.build(creditor=self.ola), self.build("0.00"), self.build("-1.00")):
+            with self.subTest(p=p), self.assertRaises(IntegrityError), db_transaction.atomic():
+                p.save()
+
+    def test_open_and_settled(self):
+        open_debt, paid_debt = self.make(), self.make()
+        self.settle(paid_debt, self.payment())
+        self.assertEqual(list(PlannedTransaction.objects.open()), [open_debt])
+        self.assertEqual(list(PlannedTransaction.objects.settled()), [paid_debt])
+        self.assertTrue(paid_debt.is_settled)
+        self.assertFalse(open_debt.is_settled)
+
+    def test_settled_needs_payment_and_time_together(self):
+        p = self.build(settled_by=self.payment())  # no settled_at
+        with self.assertRaises(IntegrityError):
+            p.save()
+
+    def test_settled_debt_is_final(self):
+        p = self.make()
+        self.settle(p, self.payment())
+        p.amount = Decimal("1.00")
+        with self.assertRaises(ValueError):
+            p.save()
+        with self.assertRaises(ValueError):
+            p.delete()
+
+    def test_open_debt_can_be_edited_and_deleted(self):
+        p = self.make()
+        p.amount = Decimal("1.00")
+        p.save()
+        p.delete()
+        self.assertFalse(PlannedTransaction.objects.exists())
+
+    def test_user_with_debts_cannot_be_deleted(self):
+        self.make()
+        for user in (self.ola, self.jan):
+            with self.assertRaises(ProtectedError):
+                user.delete()
+
+    def test_payment_that_settled_a_debt_is_linked(self):
+        pay = self.payment()
+        p = self.make()
+        self.settle(p, pay)
+        leftover = self.make("10.00", created_by_payment=pay)
+        self.assertEqual(list(pay.settled_debts.all()), [p])
+        self.assertEqual(list(pay.leftovers.all()), [leftover])
+
+    def test_not_shown_among_done_transactions(self):
+        self.make()
+        self.client.force_login(self.jan)
+        self.assertNotContains(self.client.get(reverse("transactions")), "Fotel")
+
+
+class PlannedTransactionAdminTests(TestCase):
+    def setUp(self):
+        self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.client.force_login(self.boss)
+
+    def add(self, **overrides):
+        data = {"debtor": self.ola.pk, "creditor": self.boss.pk, "amount": "307.09",
+                "description": "Fotel", **overrides}
+        return self.client.post(reverse("admin:sheetapp_plannedtransaction_add"), data)
+
+    def test_add_and_list(self):
+        self.assertEqual(self.add().status_code, 302)
+        p = PlannedTransaction.objects.get()
+        self.assertEqual((p.debtor, p.creditor, p.amount, p.created_by), (self.ola, self.boss, Decimal("307.09"), self.boss))
+        response = self.client.get(reverse("admin:sheetapp_plannedtransaction_changelist"))
+        self.assertContains(response, "Fotel")
+        self.assertContains(response, "Open")
+
+    def test_invalid_values_show_a_message(self):
+        for overrides, message in [({"creditor": self.ola.pk}, "must be different people"),
+                                   ({"amount": "0"}, "greater than or equal to 0.01"),
+                                   ({"amount": "-1"}, "greater than or equal to 0.01"),
+                                   ({"amount": "1.005"}, "no more than 2 decimal places")]:
+            with self.subTest(overrides=overrides):
+                self.assertContains(self.add(**overrides), message)
+        self.assertFalse(PlannedTransaction.objects.exists())
+
+    def test_shops_not_offered(self):
+        response = self.client.get(reverse("admin:sheetapp_plannedtransaction_add"))
+        shop = User.objects.get(username=SHOP_USERNAME)
+        self.assertNotContains(response, f'<option value="{shop.pk}"')
+        self.assertContains(self.add(debtor=shop.pk), "Select a valid choice")
+
+    def test_status_filter_and_settled_is_read_only(self):
+        open_debt = PlannedTransaction.objects.create(debtor=self.ola, creditor=self.boss, amount=Decimal("1.00"),
+                                                      description="Kawa", created_by=self.boss)
+        pay = Transaction.objects.create(amount=Decimal("2.00"), payer=self.ola, recipient=self.boss,
+                                         created_by=self.boss, description="Zwrot")
+        paid = PlannedTransaction.objects.create(debtor=self.ola, creditor=self.boss, amount=Decimal("2.00"),
+                                                 description="Herbata", created_by=self.boss,
+                                                 settled_by=pay, settled_at=timezone.now())
+        changelist = reverse("admin:sheetapp_plannedtransaction_changelist")
+        r = self.client.get(changelist, {"status": "open"})
+        self.assertContains(r, "Kawa")
+        self.assertNotContains(r, "Herbata")
+        r = self.client.get(changelist, {"status": "settled"})
+        self.assertContains(r, "Herbata")
+        self.assertNotContains(r, "Kawa")
+
+        # Settled: view only, no delete. Open: editable and deletable.
+        self.assertNotContains(self.client.get(reverse("admin:sheetapp_plannedtransaction_change", args=[paid.pk])),
+                               'name="_save"')
+        self.assertEqual(self.client.get(reverse("admin:sheetapp_plannedtransaction_delete", args=[paid.pk])).status_code, 403)
+        self.assertContains(self.client.get(reverse("admin:sheetapp_plannedtransaction_change", args=[open_debt.pk])),
+                            'name="_save"')
+
+        # "Delete selected" refuses when a settled one is selected, and deletes nothing.
+        r = self.client.post(changelist, {"action": "delete_selected", "_selected_action": [open_debt.pk, paid.pk], "post": "yes"})
+        self.assertEqual(r.status_code, 403)
+        self.assertEqual(PlannedTransaction.objects.count(), 2)
+        self.client.post(changelist, {"action": "delete_selected", "_selected_action": [open_debt.pk], "post": "yes"})
+        self.assertEqual(list(PlannedTransaction.objects.all()), [paid])
+

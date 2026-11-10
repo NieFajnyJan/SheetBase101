@@ -32,8 +32,8 @@ def login_page(request):
 
 @login_required
 def transactions(request):
-    """One page: add a done transaction (#8), add a missing shop, and see all done transactions
-    with their total (#9), optionally filtered."""
+    """One page: add a done transaction, add a missing shop, and see all done transactions
+    with their total, optionally filtered."""
     form = TransactionForm(initial={"payer": request.user})
     shop_form = ShopForm()
 
@@ -66,7 +66,7 @@ def transactions(request):
 
 
 def own_transaction(request, pk):
-    """The transaction, if the logged-in user may correct it (#22); otherwise 403."""
+    """The transaction, if the logged-in user may correct it; otherwise 403."""
     transaction = get_object_or_404(transactions_with_history(), pk=pk)
     if not transaction.can_be_corrected_by(request.user):
         raise PermissionDenied("Only whoever added a transaction can correct it, and not once it's cancelled.")
@@ -101,7 +101,7 @@ def cancel_transaction(request, pk):
 
 @login_required
 def summary(request):
-    """All time, then this year and last year (#13). On 1 January "last year" is the year that just ended."""
+    """All time, then this year and last year. On 1 January "last year" is the year that just ended."""
     today = timezone.localdate()
     return render(request, "sheetapp/summary.html", {
         "all_time": all_time_summary(),

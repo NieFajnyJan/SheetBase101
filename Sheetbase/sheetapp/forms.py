@@ -34,7 +34,7 @@ class TransactionForm(forms.ModelForm):
 
 
 class CorrectionForm(TransactionForm):
-    """The add form, pre-filled with the transaction's current values, plus a reason (#22)."""
+    """The add form, pre-filled with the transaction's current values, plus a reason."""
 
     class Meta(TransactionForm.Meta):
         model = TransactionCorrection
