@@ -2,7 +2,7 @@ from django import forms
 from django.utils import timezone
 from django.utils.text import slugify
 
-from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, Transaction, TransactionCorrection, User
+from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, PlannedTransaction, Transaction, TransactionCorrection, User
 
 # dd/mm/yy everywhere. A text box (the browser's own date picker can't change its format);
 # the "datepicker" class turns it into a calendar on the page. 4-digit years are accepted too.
@@ -66,6 +66,16 @@ class CancelForm(forms.ModelForm):
             setattr(self.instance, f, getattr(original.current, f))
         self.instance.original = original
         self.instance.cancelled = True
+
+
+class PlannedTransactionForm(forms.ModelForm):
+    """Add or edit a debt. Shops aren't offered: they never owe or are owed."""
+
+    class Meta:
+        model = PlannedTransaction
+        fields = ["debtor", "creditor", "amount", "description", "tag"]
+        field_classes = {"amount": AmountField}
+        widgets = {"amount": forms.TextInput(attrs={"inputmode": "decimal"})}
 
 
 MONTHS = [(m, timezone.datetime(2000, m, 1).strftime("%B")) for m in range(1, 13)]

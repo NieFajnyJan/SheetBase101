@@ -11,5 +11,8 @@ urlpatterns = [
     path("transactions/", views.transactions, name="transactions"),
     path("transactions/<int:pk>/correct/", views.correct_transaction, name="correct_transaction"),
     path("transactions/<int:pk>/cancel/", views.cancel_transaction, name="cancel_transaction"),
+    path("planned/", views.planned, name="planned"),
+    path("planned/<int:pk>/edit/", views.edit_planned, name="edit_planned"),
+    path("planned/<int:pk>/delete/", views.delete_planned, name="delete_planned"),
     path("summary/", views.summary, name="summary"),
 ]

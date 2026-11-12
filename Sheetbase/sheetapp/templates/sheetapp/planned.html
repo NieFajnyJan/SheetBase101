@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Planned · SheetBase{% endblock %}
+
+{% block extra_head %}
+<style>
+  main { max-width: 1100px; }
+  /* Add form centred; the link to the other page sits beside it (same layout as Transactions). */
+  .forms { display: grid; grid-template-columns: 1fr minmax(0, 480px) 1fr; gap: 1rem; align-items: start; }
+  .forms > .form-card { grid-column: 2; }
+  .forms > .side { grid-column: 3; max-width: 260px; }
+  @media (max-width: 900px) {
+    .forms { grid-template-columns: minmax(0, 480px); justify-content: center; }
+    .forms > .form-card, .forms > .side { grid-column: 1; max-width: none; }
+  }
+  .card h2 { margin-top: 0; font-size: 1.15rem; }
+  h2.section { margin: 2rem 0 .5rem; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
+  td.desc { white-space: normal; }
+  th { background: #f3f4f7; }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
+  .tag { border-radius: 10px; padding: .05rem .5rem; font-size: .8rem; background: #e8ecf5; color: #2b3a55; }
+  td.actions a { margin-right: .6rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <div class="forms">
+    <form class="card form-card" method="post">
+      {% csrf_token %}
+      <h2>Add planned transaction</h2>
+      <p class="muted">A debt: someone owes someone money. Nothing has been paid yet.</p>
+      {{ form.as_p }}
+      <button class="btn">Add</button>
+    </form>
+    <div class="side">
+      <a class="card switch" href="{% url 'transactions' %}">Add a done transaction →</a>
+    </div>
+  </div>
+
+  <h2 class="section">Open planned transactions</h2>
+  {% if debts %}
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Owes</th><th>Owed to</th><th>What for</th><th class="num">Amount</th><th>Added</th><th></th></tr></thead>
+        <tbody>
+          {% for d in debts %}
+            <tr>
+              <td>{{ d.debtor }}</td><td>{{ d.creditor }}</td>
+              <td class="desc">{{ d.description }}{% if d.tag %} <span class="tag">{{ d.tag }}</span>{% endif %}</td>
+              <td class="num">{{ d.amount|zl }}</td><td>{{ d.created_at|date:"d/m/y" }}</td>
+              <td class="actions">{% if d.creditor_id == user.pk %}<a href="{% url 'edit_planned' d.pk %}">Edit</a><a href="{% url 'delete_planned' d.pk %}">Delete</a>{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot><tr><td colspan="3">Total</td><td class="num">{{ total|zl }}</td><td colspan="2"></td></tr></tfoot>
+      </table>
+    </div>
+  {% else %}
+    <p class="card muted">No open planned transactions – nobody owes anything.</p>
+  {% endif %}
+{% endblock %}

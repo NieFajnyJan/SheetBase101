@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Delete planned transaction · SheetBase{% endblock %}
+
+{% block content %}
+  <form class="card" method="post">
+    {% csrf_token %}
+    <h2>Delete planned transaction</h2>
+    <p><strong>Only delete a debt that was entered by mistake.</strong>
+      If it was paid, add the payment on the <a href="{% url 'transactions' %}">Transactions</a> page instead –
+      that settles the debt and keeps it in the history.</p>
+
+    {% if rows|length > 1 %}<p>It's part of a group, so all of these are deleted:</p>{% else %}<p>This is deleted:</p>{% endif %}
+    <ul>
+      {% for r in rows %}<li>{{ r.debtor }} owes {{ r.creditor }} {{ r.amount|zl }} – {{ r.description }}</li>{% endfor %}
+    </ul>
+
+    {% if problems %}
+      <ul class="errorlist">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
+      <p class="muted">Nothing can be deleted.</p>
+    {% else %}
+      <button class="btn">Delete</button>
+    {% endif %}
+    <a href="{% url 'planned' %}">Back</a>
+  </form>
+{% endblock %}

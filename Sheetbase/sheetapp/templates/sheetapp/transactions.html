@@ -55,16 +55,19 @@
       <button class="btn">Add</button>
     </form>
 
-    {# Collapsed by default; stays open when the shop form has an error. #}
-    <details class="card side"{% if shop_form.errors %} open{% endif %}>
-      <summary>+ Add shop</summary>
-      <p class="muted">Shop missing from “paid to”? Add it here.</p>
-      <form method="post">
-        {% csrf_token %}
-        {{ shop_form.as_p }}
-        <button class="btn" name="add_shop">Add shop</button>
-      </form>
-    </details>
+    <div class="side">
+      <a class="card switch" href="{% url 'planned' %}">Add a planned transaction →</a>
+      {# Collapsed by default; stays open when the shop form has an error. #}
+      <details class="card"{% if shop_form.errors %} open{% endif %}>
+        <summary>+ Add shop</summary>
+        <p class="muted">Shop missing from “paid to”? Add it here.</p>
+        <form method="post">
+          {% csrf_token %}
+          {{ shop_form.as_p }}
+          <button class="btn" name="add_shop">Add shop</button>
+        </form>
+      </details>
+    </div>
   </div>
 
   <h2 class="section">Done transactions</h2>

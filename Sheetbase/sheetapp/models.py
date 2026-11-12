@@ -10,7 +10,6 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
 
-
 # Shops are users with is_shop=True that can't log in; purchases are paid to them.
 # This one is created in migration 0003; more can be added on the Transactions page.
 SHOP_USERNAME = "shop"
@@ -337,6 +336,11 @@ class PlannedTransaction(models.Model):
     @property
     def is_settled(self):
         return self.settled_by_id is not None
+
+    def can_be_changed_by(self, user):
+        """Only the creditor (the one owed the money) may edit or delete a debt – never the debtor –
+        and only while it's open."""
+        return user.pk == self.creditor_id and not self.is_settled
 
     # A settled debt is history: it can't be changed or deleted (only reopened when the payment that settled it is cancelled).
     def save(self, *args, **kwargs):

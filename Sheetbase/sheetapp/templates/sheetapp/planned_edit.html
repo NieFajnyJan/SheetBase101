@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+{% block title %}Edit planned transaction · SheetBase{% endblock %}
+
+{% block content %}
+  <form class="card" method="post">
+    {% csrf_token %}
+    <h2>Edit planned transaction</h2>
+    <p class="muted">Fix what was entered wrong. To record that it was paid, add a payment on the Transactions page instead.</p>
+    {{ form.as_p }}
+    <button class="btn">Save</button>
+    <a href="{% url 'planned' %}">Back</a>
+  </form>
+{% endblock %}

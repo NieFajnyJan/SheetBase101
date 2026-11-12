@@ -1,7 +1,6 @@
+from django.db import models
 from django.test import TestCase
 from django.urls import reverse
-
-from django.db import models
 
 from .models import User
 
@@ -1337,3 +1336,137 @@ class PlannedGroupTests(TestCase):
         paid = self.debt(self.ewa, settled_by=pay, settled_at=timezone.now())
         self.assertContains(self.action("group_selected", ola, paid), "can&#x27;t be grouped")
         self.assertIsNone(PlannedTransaction.objects.get(pk=ola.pk).group)
+
+
+# --------------------------------------------------------------------------- Planned page
+class PlannedPageTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.ewa = User.objects.create_user("ewa", "ewa@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.url = reverse("planned")
+        self.client.force_login(self.jan)
+
+    def debt(self, amount="10.00", debtor=None, creditor=None, description="Pizza", **fields):
+        return PlannedTransaction.objects.create(debtor=debtor or self.ola, creditor=creditor or self.jan,
+                                                 amount=Decimal(amount), description=description,
+                                                 created_by=self.jan, **fields)
+
+    def add(self, **fields):
+        data = {"debtor": self.ola.pk, "creditor": self.jan.pk, "amount": "307,09", "description": "Fotel"}
+        return self.client.post(self.url, {**data, **fields})
+
+    def edit_url(self, d):
+        return reverse("edit_planned", args=[d.pk])
+
+    def delete_url(self, d):
+        return reverse("delete_planned", args=[d.pk])
+
+    def test_logged_out_goes_to_login(self):
+        self.client.logout()
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}",
+                             fetch_redirect_response=False)
+
+    def test_in_menu(self):
+        self.assertContains(self.client.get(reverse("home")), f'href="{self.url}"')
+
+    def test_switch_between_add_forms(self):
+        self.assertContains(self.client.get(self.url), "Add a done transaction")
+        self.assertContains(self.client.get(reverse("transactions")), "Add a planned transaction")
+
+    def test_add(self):
+        self.assertRedirects(self.add(), self.url)
+        d = PlannedTransaction.objects.get()
+        self.assertEqual((d.debtor, d.creditor, d.amount, d.created_by), (self.ola, self.jan, Decimal("307.09"), self.jan))
+        self.assertContains(self.client.get(self.url), "Fotel")
+
+    def test_form_defaults_to_me_and_hides_shops(self):
+        page = self.client.get(self.url)
+        self.assertEqual(page.context["form"]["creditor"].value(), self.jan.pk)
+        self.assertNotContains(page, f'<option value="{self.shop.pk}"')
+
+    def test_bad_input_shows_message(self):
+        for fields, message in [({"creditor": self.ola.pk}, "must be different people"),
+                                ({"amount": "0"}, "greater than or equal to 0.01"),
+                                ({"amount": "-1"}, "greater than or equal to 0.01"),
+                                ({"amount": "1,005"}, "no more than 2 decimal places"),
+                                ({"debtor": self.shop.pk}, "Select a valid choice")]:
+            with self.subTest(fields=fields):
+                self.assertContains(self.add(**fields), message)
+        self.assertFalse(PlannedTransaction.objects.exists())
+
+    def test_lists_open_ones_with_total(self):
+        self.debt("10.00", description="Kawa")
+        self.debt("2.50", description="Herbata", debtor=self.ewa, creditor=self.ola)
+        pay = Transaction.objects.create(amount=Decimal("5.00"), payer=self.ola, recipient=self.jan,
+                                         created_by=self.jan, description="Zwrot")
+        self.debt("5.00", description="Ciastko", settled_by=pay, settled_at=timezone.now())
+        page = self.client.get(self.url)
+        self.assertContains(page, "Kawa")
+        self.assertContains(page, "Herbata")
+        self.assertNotContains(page, "Ciastko")  # settled ones are hidden
+        self.assertEqual(page.context["total"], Decimal("12.50"))
+
+    def test_creditor_edits(self):
+        d = self.debt()
+        self.assertContains(self.client.get(self.url), self.edit_url(d))
+        response = self.client.post(self.edit_url(d), {"debtor": self.ewa.pk, "creditor": self.jan.pk,
+                                                       "amount": "12,50", "description": "Pizza duża"})
+        self.assertRedirects(response, self.url)
+        d.refresh_from_db()
+        self.assertEqual((d.debtor, d.amount, d.description), (self.ewa, Decimal("12.50"), "Pizza duża"))
+
+    def test_edit_validates(self):
+        d = self.debt()
+        response = self.client.post(self.edit_url(d), {"debtor": self.jan.pk, "creditor": self.jan.pk,
+                                                       "amount": "1", "description": "x"})
+        self.assertContains(response, "must be different people")
+
+    def test_creditor_deletes_after_warning(self):
+        d = self.debt()
+        page = self.client.get(self.delete_url(d))
+        self.assertContains(page, "Only delete a debt that was entered by mistake")
+        self.assertTrue(PlannedTransaction.objects.exists())  # nothing deleted until confirmed
+        self.assertRedirects(self.client.post(self.delete_url(d)), self.url)
+        self.assertFalse(PlannedTransaction.objects.exists())
+
+    def test_only_creditor_can_edit_or_delete(self):
+        d = self.debt()  # ola owes jan
+        for who in (self.ola, self.ewa):  # the debtor and a bystander
+            self.client.force_login(who)
+            self.assertNotContains(self.client.get(self.url), self.edit_url(d))
+            self.assertEqual(self.client.get(self.edit_url(d)).status_code, 403)
+            self.assertEqual(self.client.post(self.edit_url(d), {"debtor": self.ola.pk, "creditor": self.jan.pk,
+                                                                 "amount": "1", "description": "x"}).status_code, 403)
+            self.assertEqual(self.client.post(self.delete_url(d)).status_code, 403)
+        d.refresh_from_db()
+        self.assertEqual(d.amount, Decimal("10.00"))
+
+    def test_settled_cant_be_edited_or_deleted(self):
+        pay = Transaction.objects.create(amount=Decimal("10.00"), payer=self.ola, recipient=self.jan,
+                                         created_by=self.jan, description="Zwrot")
+        d = self.debt(settled_by=pay, settled_at=timezone.now())
+        self.assertEqual(self.client.get(self.edit_url(d)).status_code, 403)
+        self.assertEqual(self.client.post(self.delete_url(d)).status_code, 403)
+
+    def test_delete_takes_the_group(self):
+        a, b = self.debt(), self.debt(debtor=self.ewa)
+        alone = self.debt(description="Kawa")
+        PlannedTransaction.objects.filter(pk__in=[a.pk, b.pk]).make_group()
+        self.assertContains(self.client.get(self.delete_url(a)), "all of these are deleted")
+        self.client.post(self.delete_url(a))
+        self.assertEqual(list(PlannedTransaction.objects.all()), [alone])
+
+    def test_group_delete_refused_when_paid_or_owed_to_someone_else(self):
+        pay = Transaction.objects.create(amount=Decimal("10.00"), payer=self.ewa, recipient=self.jan,
+                                         created_by=self.jan, description="Zwrot")
+        a = self.debt()
+        paid = self.debt(debtor=self.ewa, settled_by=pay, settled_at=timezone.now())
+        PlannedTransaction.objects.filter(pk__in=[a.pk, paid.pk]).make_group()
+        self.assertContains(self.client.post(self.delete_url(a)), "ewa already paid")
+
+        b, not_mine = self.debt(), self.debt(debtor=self.jan, creditor=self.ewa)
+        PlannedTransaction.objects.filter(pk__in=[b.pk, not_mine.pk]).make_group()
+        self.assertContains(self.client.post(self.delete_url(b)), "is owed to ewa, not you")
+        self.assertEqual(PlannedTransaction.objects.count(), 4)
