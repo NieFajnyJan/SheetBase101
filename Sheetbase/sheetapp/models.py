@@ -35,6 +35,11 @@ def validate_transaction_date(value):
         raise ValidationError(f"The date can be at most {MAX_YEARS_BACK} years back.")
 
 
+def needs_matching(payer, recipient):
+    """A payment between two members pays debts; a purchase or return (to or from a shop) never does."""
+    return not (payer.is_shop or recipient.is_shop)
+
+
 class User(AbstractUser):
     """Office member. Builds on Django's user (first_name, last_name, username, password...),
     so login, admin and later Google/Discord login work out of the box."""
@@ -51,6 +56,8 @@ class User(AbstractUser):
 
 # The fields a correction can change, in the order they're shown.
 CORRECTABLE_FIELDS = ["amount", "payer", "recipient", "description", "date"]
+# Once a payment has settled debts, these can't be corrected any more (description and date still can).
+MONEY_FIELDS = ["amount", "payer_id", "recipient_id"]
 
 
 class TransactionQuerySet(models.QuerySet):
@@ -145,6 +152,10 @@ class Transaction(models.Model):
     def is_corrected(self):
         return len(self.versions) > 1
 
+    def touches_debts(self):
+        """Whether this payment settled planned transactions or created a leftover."""
+        return self.settled_debts.exists() or self.leftovers.exists()
+
     def can_be_corrected_by(self, user):
         """Only whoever added the transaction can correct or cancel it, and not once it's cancelled."""
         return user.pk == self.created_by_id and not self.is_cancelled
@@ -197,14 +208,33 @@ class TransactionCorrection(models.Model):
         return f"{what}: {self.date:%d/%m/%y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
 
     def clean(self):
+        if not self.original_id:
+            return
         # A cancelled transaction stays cancelled – record a new one instead.
-        if self.original_id and self.original.corrections.filter(cancelled=True).exclude(pk=self.pk).exists():
+        if self.original.corrections.filter(cancelled=True).exclude(pk=self.pk).exists():
             raise ValidationError("This transaction is cancelled and can't be corrected any more.")
+        if self.cancelled:
+            from .payments import check_can_undo
+
+            check_can_undo(self.original)
+        elif self.payer_id and self.recipient_id:
+            current = self.original.current
+            if any(getattr(self, f) != getattr(current, f) for f in MONEY_FIELDS) and (
+                    self.original.touches_debts()
+                    # A purchase corrected into a payment between members would skip paying debts.
+                    or needs_matching(self.payer, self.recipient) and not needs_matching(current.payer, current.recipient)):
+                raise ValidationError("This payment pays debts between members, so its amount, “paid by” and "
+                                      "“paid to” can't be changed. Cancel it and add it again instead.")
 
     def save(self, *args, **kwargs):
         if not self._state.adding:
             raise ValueError("A correction can't be edited.")
-        super().save(*args, **kwargs)
+        with db_transaction.atomic():
+            super().save(*args, **kwargs)
+            if self.cancelled:
+                from .payments import undo_payment
+
+                undo_payment(self.original)
 
     def delete(self, *args, **kwargs):
         raise ValueError("A correction can't be deleted.")
