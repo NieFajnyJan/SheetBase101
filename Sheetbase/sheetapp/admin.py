@@ -2,7 +2,8 @@ from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Q
 
-from .models import PlannedTransaction, Transaction, TransactionCorrection, User
+from .models import PlannedTransaction, Transaction, TransactionCorrection, User, needs_matching
+from .payments import record_payment
 
 
 @admin.register(User)
@@ -67,7 +68,10 @@ class TransactionAdmin(admin.ModelAdmin):
     def save_model(self, request, obj, form, change):
         # Whoever adds the entry in the admin is recorded as its author.
         obj.created_by = request.user
-        super().save_model(request, obj, form, change)
+        if needs_matching(obj.payer, obj.recipient):
+            record_payment(obj)  # pays debts like on the site, just without the confirmation screen
+        else:
+            super().save_model(request, obj, form, change)
 
 
 @admin.register(TransactionCorrection)
@@ -75,7 +79,8 @@ class TransactionCorrectionAdmin(admin.ModelAdmin):
     """Staff can add corrections here for any transaction (on the site only its author can).
     Like transactions, corrections are final: never edited or deleted."""
 
-    list_display = ("created_at", "original", "cancelled", "amount", "payer", "recipient", "date", "created_by", "reason")
+    list_display = ("created_at", "original", "cancelled", "amount", "payer", "recipient", "date", "created_by",
+                    "reason")
     list_filter = ("cancelled",)
     search_fields = ("description", "reason", "original__description")
     autocomplete_fields = ("original",)  # search box: type part of the description

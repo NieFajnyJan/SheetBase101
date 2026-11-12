@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Confirm payment · SheetBase{% endblock %}
+
+{% block extra_head %}
+<style>
+  .covers { list-style: none; padding: 0; margin: .5rem 0 1rem; }
+  .covers li { display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px dashed #dde; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .leftover { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; }
+  .actions { display: flex; gap: .6rem; margin-top: 1.2rem; }
+  .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <form class="card" method="post">
+    {% csrf_token %}
+    {% for field in form %}{{ field.as_hidden }}{% endfor %}
+    <input type="hidden" name="plan" value="{{ plan.signature }}">
+
+    <h2>Confirm payment</h2>
+    <p><strong>{{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
+
+    {% if plan.covered %}
+      <p>This payment of {{ payment.amount|zl }} covers:</p>
+      <ul class="covers">
+        {% for debt in plan.covered %}
+          <li><span>{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}</span>
+            <span class="num">{{ debt.amount|zl }}</span></li>
+        {% endfor %}
+      </ul>
+    {% else %}
+      <p>{{ payment.payer }} doesn't owe {{ payment.recipient }} anything.</p>
+    {% endif %}
+
+    {% with left=plan.leftover %}
+      {% if left %}
+        <p class="leftover">Leftover: <strong>{{ left.debtor }} owes {{ left.creditor }} {{ left.amount|zl }}</strong>
+          <span class="muted">– {{ left.description }}</span></p>
+      {% else %}
+        <p class="leftover">No leftover – the debts are paid exactly.</p>
+      {% endif %}
+    {% endwith %}
+
+    <p class="muted">Nothing is saved until you click Confirm.</p>
+    <div class="actions">
+      <button class="btn" name="confirm">Confirm</button>
+      <button class="btn btn-secondary" name="back">Back</button>
+    </div>
+  </form>
+{% endblock %}

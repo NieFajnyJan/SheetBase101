@@ -1,13 +1,14 @@
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Sum
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
 from .forms import CancelForm, CorrectionForm, HistoryFilterForm, ShopForm, TransactionForm
-from .models import Transaction, TransactionCorrection
+from .models import Transaction, TransactionCorrection, needs_matching
+from .payments import PlanChanged, plan_payment, record_payment
 from .summary import all_time_summary, year_summary
 
 
@@ -44,12 +45,14 @@ def transactions(request):
             return redirect(request.get_full_path())  # keeps the current filters
     elif request.method == "POST":
         form = TransactionForm(request.POST)
-        if form.is_valid():
+        if form.is_valid() and "back" not in request.POST:  # Back: the form again, still filled in
             obj = form.save(commit=False)
             obj.created_by = request.user
-            obj.save()
-            messages.success(request, f"Added: {obj}")
-            return redirect(request.get_full_path())
+            if not needs_matching(obj.payer, obj.recipient):  # a purchase or return: no debts involved
+                obj.save()
+                messages.success(request, f"Added: {obj}")
+                return redirect(request.get_full_path())
+            return confirm_payment(request, form, obj)
 
     filter_form = HistoryFilterForm(request.GET)
     done = transactions_with_history().order_by("-cur_date", "-created_at")
@@ -63,6 +66,23 @@ def transactions(request):
         "transactions": done,
         "total": done.aggregate(t=Sum("cur_counted"))["t"] or 0,  # corrected amounts; cancelled count 0
     })
+
+
+def confirm_payment(request, form, payment):
+    """A payment between members: first shows which debts it settles and what's left over;
+    saves only when Confirm is clicked."""
+    plan = None
+    if "confirm" in request.POST:
+        try:
+            record_payment(payment, expected_signature=request.POST.get("plan", ""))
+        except PlanChanged as changed:
+            plan = changed.plan
+            messages.warning(request, "The debts changed in the meantime – please check again.")
+        else:
+            messages.success(request, f"Added: {payment}")
+            return redirect(request.get_full_path())
+    plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description)
+    return render(request, "sheetapp/confirm_payment.html", {"form": form, "payment": payment, "plan": plan})
 
 
 def own_transaction(request, pk):
@@ -93,9 +113,13 @@ def cancel_transaction(request, pk):
     if request.method == "POST" and form.is_valid():
         correction = form.save(commit=False)
         correction.created_by = request.user
-        correction.save()
-        messages.success(request, str(correction))
-        return redirect("transactions")
+        try:
+            correction.save()
+        except ValidationError as e:  # the leftover got paid after the form was checked
+            form.add_error(None, e)
+        else:
+            messages.success(request, str(correction))
+            return redirect("transactions")
     return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": True})
 
 

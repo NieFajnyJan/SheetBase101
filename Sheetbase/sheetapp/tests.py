@@ -318,7 +318,12 @@ class AddTransactionTests(TestCase):
 
     def test_member_adds_and_sees_it_in_the_list(self):
         self.client.force_login(self.jan)
-        response = self.post(payer=self.ola.pk, recipient=self.jan.pk, amount="2137")
+        # Between members: a confirmation screen first, saved on Confirm.
+        screen = self.post(payer=self.ola.pk, recipient=self.jan.pk, amount="2137")
+        self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+        self.assertFalse(Transaction.objects.exists())
+        response = self.post(payer=self.ola.pk, recipient=self.jan.pk, amount="2137", confirm="",
+                             plan=screen.context["plan"].signature())
         self.assertRedirects(response, self.url)
         t = Transaction.objects.get()
         self.assertEqual((t.payer, t.recipient, t.amount, t.created_by),
@@ -601,10 +606,11 @@ class CorrectionTests(TestCase):
         from datetime import date
 
         last_year = date(today().year - 1, 6, 15)
-        self.correct(payer=self.ola.pk, recipient=self.jan.pk, description="Herbata",
+        other_shop = User.objects.create(username="shop-zabka", email="zabka@sheetbase.invalid", is_shop=True)
+        self.correct(payer=self.ola.pk, recipient=other_shop.pk, description="Herbata",
                      date=last_year.strftime("%d/%m/%y"))
         c = self.row().current
-        self.assertEqual((c.payer, c.recipient, c.description, c.date), (self.ola, self.jan, "Herbata", last_year))
+        self.assertEqual((c.payer, c.recipient, c.description, c.date), (self.ola, other_shop, "Herbata", last_year))
         self.assertEqual(self.total(payer=self.jan.pk), 0)
         self.assertEqual(self.total(payer=self.ola.pk), Decimal("124.90"))
         self.assertEqual(self.total(recipient=self.shop.pk), 0)
@@ -1057,7 +1063,209 @@ class PlannedTransactionAdminTests(TestCase):
         self.assertEqual(list(PlannedTransaction.objects.all()), [paid])
 
 
-# --------------------------------------------------------------------------- Planned transaction groups
+
+# --------------------------------------------------------------------------- Paying debts
+from .payments import plan_payment
+
+
+class PayingDebtsTests(TestCase):
+    """A payment between members settles the payer's debts to the person paid, oldest first."""
+
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.ewa = User.objects.create_user("ewa", "ewa@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.url = reverse("transactions")
+        self.client.force_login(self.ola)
+
+    def debt(self, amount, debtor=None, creditor=None, description="Fotel", tag=""):
+        return PlannedTransaction.objects.create(debtor=debtor or self.ola, creditor=creditor or self.jan,
+                                                 amount=Decimal(amount), description=description, tag=tag,
+                                                 created_by=self.jan)
+
+    def data(self, amount, payer=None, recipient=None, **extra):
+        return {"amount": amount, "payer": (payer or self.ola).pk, "recipient": (recipient or self.jan).pk,
+                "description": "Zwrot", "date": today().strftime("%d/%m/%y"), **extra}
+
+    def pay(self, amount, **kwargs):
+        """Shows the confirmation screen, then clicks Confirm. Returns the saved payment."""
+        screen = self.client.post(self.url, self.data(amount, **kwargs))
+        self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+        self.assertRedirects(self.client.post(self.url, self.data(
+            amount, confirm="", plan=screen.context["plan"].signature(), **kwargs)), self.url)
+        return Transaction.objects.latest("created_at")
+
+    def leftover(self, payment):
+        return payment.leftovers.get()
+
+    def refresh(self, *rows):
+        return [PlannedTransaction.objects.get(pk=r.pk) for r in rows]
+
+    # --- the screen
+    def test_screen_shows_what_is_covered_and_saves_nothing(self):
+        self.debt("90.00", description="Krzesło")
+        page = self.client.post(self.url, self.data("100,00"))
+        self.assertContains(page, "This payment of 100,00\xa0zł covers:")
+        self.assertContains(page, "Krzesło")
+        self.assertContains(page, "Leftover: <strong>jan owes ola 10,00\xa0zł")
+        self.assertFalse(Transaction.objects.exists())
+        self.assertEqual(PlannedTransaction.objects.open().count(), 1)
+
+    def test_back_returns_to_filled_form(self):
+        page = self.client.post(self.url, self.data("12,34", back=""))
+        self.assertTemplateUsed(page, "sheetapp/transactions.html")
+        self.assertContains(page, 'value="12,34"')
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_purchases_and_returns_skip_the_screen(self):
+        self.debt("90.00")
+        self.assertRedirects(self.client.post(self.url, self.data("5.00", recipient=self.shop)), self.url)
+        self.assertRedirects(self.client.post(self.url, self.data("5.00", payer=self.shop, recipient=self.ola)),
+                             self.url)
+        self.assertEqual(Transaction.objects.count(), 2)
+        self.assertEqual(PlannedTransaction.objects.open().count(), 1)  # untouched, no leftovers
+
+    def test_debts_changed_meanwhile_shows_screen_again(self):
+        self.debt("90.00")
+        screen = self.client.post(self.url, self.data("90.00"))
+        PlannedTransaction.objects.get().delete()  # the debt shown on the screen is deleted before Confirm
+        page = self.client.post(self.url, self.data("90.00", confirm="", plan=screen.context["plan"].signature()))
+        self.assertTemplateUsed(page, "sheetapp/confirm_payment.html")
+        self.assertContains(page, "changed in the meantime")
+        self.assertFalse(Transaction.objects.exists())
+
+    # --- matching
+    def test_exact(self):
+        d = self.debt("90.00")
+        pay = self.pay("90.00")
+        [d] = self.refresh(d)
+        self.assertEqual(d.settled_by, pay)
+        self.assertIsNotNone(d.settled_at)
+        self.assertFalse(pay.leftovers.exists())
+
+    def test_overpay_creates_debt_back(self):
+        d = self.debt("90.00")
+        pay = self.pay("100.00")
+        self.assertTrue(self.refresh(d)[0].is_settled)
+        left = self.leftover(pay)
+        self.assertEqual((left.debtor, left.creditor, left.amount, left.is_settled),
+                         (self.jan, self.ola, Decimal("10.00"), False))
+
+    def test_underpay_leaves_the_rest(self):
+        d = self.debt("110.00", description="Krzesło", tag="krzesła")
+        PlannedTransaction.objects.filter(pk=d.pk).make_group()
+        pay = self.pay("100.00")
+        self.assertTrue(self.refresh(d)[0].is_settled)
+        left = self.leftover(pay)
+        self.assertEqual((left.debtor, left.creditor, left.amount, left.description, left.tag, left.group),
+                         (self.ola, self.jan, Decimal("10.00"), "Krzesło – rest", "krzesła", None))
+
+    def test_several_debts_oldest_first(self):
+        old, middle, new = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
+        pay = self.pay("60.00")
+        old, middle, new = self.refresh(old, middle, new)
+        self.assertEqual([old.is_settled, middle.is_settled, new.is_settled], [True, True, False])
+        self.assertEqual(self.leftover(pay).amount, Decimal("20.00"))  # 30 + 50 – 60, still owed by ola
+
+    def test_nothing_owed_is_a_loan(self):
+        pay = self.pay("50.00")
+        left = self.leftover(pay)
+        self.assertEqual((left.debtor, left.creditor, left.amount, left.description),
+                         (self.jan, self.ola, Decimal("50.00"), "Zwrot"))
+
+    def test_other_peoples_rows_untouched(self):
+        mine = self.debt("30.00", tag="fotel")
+        ewas = self.debt("30.00", debtor=self.ewa, tag="fotel")
+        reverse_debt = self.debt("30.00", debtor=self.jan, creditor=self.ola)
+        to_someone_else = self.debt("30.00", creditor=self.ewa)
+        self.pay("30.00")
+        mine, ewas, reverse_debt, to_someone_else = self.refresh(mine, ewas, reverse_debt, to_someone_else)
+        self.assertTrue(mine.is_settled)
+        self.assertFalse(any(r.is_settled for r in (ewas, reverse_debt, to_someone_else)))
+
+    def test_plan_without_saving(self):
+        d = self.debt("30.00")
+        plan = plan_payment(self.ola, self.jan, Decimal("30.00"), "x")
+        self.assertEqual((plan.covered, plan.leftover), ([d], None))
+        self.assertFalse(PlannedTransaction.objects.settled().exists())
+
+    # --- cancelling and correcting the payment
+    def cancel(self, payment):
+        return self.client.post(reverse("cancel_transaction", args=[payment.pk]), {"reason": "mistake"})
+
+    def test_cancel_reopens_debts_and_removes_leftover(self):
+        a, b = self.debt("30.00"), self.debt("50.00")
+        pay = self.pay("100.00")
+        self.assertRedirects(self.cancel(pay), self.url)
+        self.assertEqual(set(PlannedTransaction.objects.open()), {a, b})
+        self.assertFalse(PlannedTransaction.objects.settled().exists())
+        self.assertFalse(pay.leftovers.exists())
+
+    def test_cancel_refused_when_leftover_already_paid(self):
+        first = self.pay("50.00")  # jan now owes ola 50
+        self.client.force_login(self.jan)
+        self.pay("50.00", payer=self.jan, recipient=self.ola)  # ...and pays it
+        self.client.force_login(self.ola)
+        self.assertContains(self.cancel(first), "Cancel that later payment first")
+        self.assertFalse(first.corrections.exists())
+        self.assertTrue(self.leftover(first).is_settled)
+
+    def test_money_of_a_payment_with_debts_cant_be_corrected(self):
+        self.debt("90.00")
+        pay = self.pay("90.00")
+        url = reverse("correct_transaction", args=[pay.pk])
+        fix = {**self.data("90.00"), "reason": "typo"}
+        for change in ({"amount": "80.00"}, {"recipient": self.ewa.pk}, {"payer": self.ewa.pk}):
+            self.assertContains(self.client.post(url, {**fix, **change}), "Cancel it and add it again")
+        self.assertFalse(pay.corrections.exists())
+        self.assertRedirects(self.client.post(url, {**fix, "description": "Zwrot za fotel"}), self.url)
+
+    def test_purchase_cant_be_corrected_into_a_payment_between_members(self):
+        d = self.debt("90.00")
+        self.client.post(self.url, self.data("90.00", recipient=self.shop))
+        purchase = Transaction.objects.get()
+        url = reverse("correct_transaction", args=[purchase.pk])
+        page = self.client.post(url, {**self.data("90.00"), "reason": "it was for jan"})
+        self.assertContains(page, "Cancel it and add it again")
+        self.assertFalse(purchase.corrections.exists())
+        self.assertFalse(self.refresh(d)[0].is_settled)
+
+    def test_cancel_race_shows_message(self):
+        from unittest import mock
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        pay = self.pay("50.00")
+        with mock.patch("sheetapp.payments.check_can_undo", side_effect=[None, DjangoValidationError("paid meanwhile")]):
+            page = self.cancel(pay)
+        self.assertContains(page, "paid meanwhile")
+        self.assertFalse(pay.corrections.exists())
+        self.assertTrue(pay.leftovers.exists())
+
+    def test_adding_in_admin_also_pays_debts(self):
+        d = self.debt("90.00")
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        self.client.post(reverse("admin:sheetapp_transaction_add"), {
+            "amount": "100.00", "payer": self.ola.pk, "recipient": self.jan.pk,
+            "description": "Zwrot", "date": today().isoformat()})
+        pay = Transaction.objects.get()
+        self.assertEqual(self.refresh(d)[0].settled_by, pay)
+        self.assertEqual(self.leftover(pay).amount, Decimal("10.00"))
+
+    def test_cancelling_in_admin_also_reopens(self):
+        d = self.debt("90.00")
+        pay = self.pay("90.00")
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.client.force_login(boss)
+        self.client.post(reverse("admin:sheetapp_transactioncorrection_add"), {
+            "original": pay.pk, "amount": "90.00", "payer": self.ola.pk, "recipient": self.jan.pk,
+            "description": "Zwrot", "date": today().isoformat(), "cancelled": "on", "reason": "mistake"})
+        self.assertTrue(pay.corrections.get().cancelled)
+        self.assertFalse(self.refresh(d)[0].is_settled)
+
+
 class PlannedGroupTests(TestCase):
     """Rows of one shared expense share a generated group id: deleting one deletes them all."""
 
