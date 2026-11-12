@@ -1105,8 +1105,9 @@ class PayingDebtsTests(TestCase):
     def test_screen_shows_what_is_covered_and_saves_nothing(self):
         self.debt("90.00", description="Krzesło")
         page = self.client.post(self.url, self.data("100,00"))
-        self.assertContains(page, "This payment of 100,00\xa0zł covers:")
+        self.assertContains(page, "What is this payment of 100,00\xa0zł for?")
         self.assertContains(page, "Krzesło")
+        self.assertContains(page, 'type="checkbox" name="debts"')
         self.assertContains(page, "Leftover: <strong>jan owes ola 10,00\xa0zł")
         self.assertFalse(Transaction.objects.exists())
         self.assertEqual(PlannedTransaction.objects.open().count(), 1)
@@ -1131,7 +1132,7 @@ class PayingDebtsTests(TestCase):
         PlannedTransaction.objects.get().delete()  # the debt shown on the screen is deleted before Confirm
         page = self.client.post(self.url, self.data("90.00", confirm="", plan=screen.context["plan"].signature()))
         self.assertTemplateUsed(page, "sheetapp/confirm_payment.html")
-        self.assertContains(page, "changed in the meantime")
+        self.assertContains(page, "please check it again")
         self.assertFalse(Transaction.objects.exists())
 
     # --- matching
@@ -1182,6 +1183,63 @@ class PayingDebtsTests(TestCase):
         mine, ewas, reverse_debt, to_someone_else = self.refresh(mine, ewas, reverse_debt, to_someone_else)
         self.assertTrue(mine.is_settled)
         self.assertFalse(any(r.is_settled for r in (ewas, reverse_debt, to_someone_else)))
+
+    # --- choosing what a payment is for
+    def choose(self, amount, debts, button="confirm", **kwargs):
+        """Posts the confirmation screen with these debts ticked."""
+        plan = plan_payment(self.ola, self.jan, Decimal(amount.replace(",", ".")), "Zwrot",
+                            chosen={d.pk for d in debts})
+        return self.client.post(self.url, self.data(amount, choosing="1", debts=[d.pk for d in debts],
+                                                    plan=plan.signature(), **{button: ""}, **kwargs))
+
+    def test_exact_match_is_picked_over_oldest(self):
+        # Jan's case: he owed 100 + 98 + 890 and paid 890 for the tort.
+        old, older = self.debt("100.00", description="za cokolwiek"), self.debt("98.00", description="retoryka")
+        tort = self.debt("890.00", description="tort")
+        screen = self.client.post(self.url, self.data("890.00"))
+        self.assertEqual([(d.pk, ticked) for d, ticked, _ in screen.context["plan"].rows()],
+                         [(old.pk, False), (older.pk, False), (tort.pk, True)])
+        pay = self.pay("890.00")
+        old, older, tort = self.refresh(old, older, tort)
+        self.assertEqual([old.is_settled, older.is_settled, tort.is_settled], [False, False, True])
+        self.assertFalse(pay.leftovers.exists())
+
+    def test_pick_which_debts(self):
+        a, b, c = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
+        self.assertRedirects(self.choose("90.00", [a, c]), self.url)
+        a, b, c = self.refresh(a, b, c)
+        self.assertEqual([a.is_settled, b.is_settled, c.is_settled], [True, False, True])
+        left = PlannedTransaction.objects.get(created_by_payment__isnull=False)
+        self.assertEqual((left.debtor, left.amount), (self.jan, Decimal("20.00")))  # overpaid by 20
+
+    def test_picked_debts_more_than_paid(self):
+        a, b, c = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
+        page = self.choose("60.00", [a, b, c], button="recalculate")
+        statuses = [status for _, _, status in page.context["plan"].rows()]
+        self.assertEqual(statuses, ["paid", "partly", "ran_out"])
+        self.assertContains(page, "paid, but 20,00\xa0zł of it stays owed")
+        self.assertFalse(Transaction.objects.exists())  # Update doesn't save
+
+    def test_nothing_ticked_is_a_loan(self):
+        d = self.debt("30.00")
+        self.assertRedirects(self.choose("30.00", []), self.url)
+        self.assertFalse(self.refresh(d)[0].is_settled)
+        left = PlannedTransaction.objects.get(created_by_payment__isnull=False)
+        self.assertEqual((left.debtor, left.creditor, left.amount), (self.jan, self.ola, Decimal("30.00")))
+
+    def test_other_peoples_debts_cant_be_ticked(self):
+        mine, ewas = self.debt("30.00"), self.debt("30.00", debtor=self.ewa)
+        self.choose("30.00", [mine, ewas])
+        self.assertTrue(self.refresh(mine)[0].is_settled)
+        self.assertFalse(self.refresh(ewas)[0].is_settled)
+
+    def test_ticks_changed_without_update_shows_screen_again(self):
+        a, b = self.debt("30.00"), self.debt("50.00")
+        screen = self.client.post(self.url, self.data("30.00"))  # a is picked (exact match)
+        page = self.client.post(self.url, self.data("30.00", choosing="1", debts=[b.pk], confirm="",
+                                                    plan=screen.context["plan"].signature()))
+        self.assertContains(page, "please check it again")
+        self.assertFalse(Transaction.objects.exists())
 
     def test_plan_without_saving(self):
         d = self.debt("30.00")
