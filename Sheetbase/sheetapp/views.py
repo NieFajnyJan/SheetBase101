@@ -6,8 +6,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from .forms import CancelForm, CorrectionForm, HistoryFilterForm, ShopForm, TransactionForm
-from .models import Transaction, TransactionCorrection, needs_matching
+from .forms import CancelForm, CorrectionForm, HistoryFilterForm, PlannedTransactionForm, ShopForm, TransactionForm
+from .models import PlannedTransaction, Transaction, TransactionCorrection, needs_matching
 from .payments import PlanChanged, plan_payment, record_payment
 from .summary import all_time_summary, year_summary
 
@@ -121,6 +121,62 @@ def cancel_transaction(request, pk):
             messages.success(request, str(correction))
             return redirect("transactions")
     return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": True})
+
+
+@login_required
+def planned(request):
+    """Add a planned transaction (a debt) and see all open ones with their total."""
+    form = PlannedTransactionForm(request.POST or None, initial={"creditor": request.user})
+    if request.method == "POST" and form.is_valid():
+        debt = form.save(commit=False)
+        debt.created_by = request.user
+        debt.save()
+        messages.success(request, f"Added: {debt}")
+        return redirect("planned")
+    debts = PlannedTransaction.objects.open().select_related("debtor", "creditor", "created_by")
+    return render(request, "sheetapp/planned.html", {
+        "form": form,
+        "debts": debts,
+        "total": debts.aggregate(t=Sum("amount"))["t"] or 0,
+    })
+
+
+def own_debt(request, pk):
+    """The planned transaction, if the logged-in user may edit or delete it; otherwise 403."""
+    debt = get_object_or_404(PlannedTransaction, pk=pk)
+    if not debt.can_be_changed_by(request.user):
+        raise PermissionDenied("Only the person who is owed the money can change a debt, and only while it's open.")
+    return debt
+
+
+@login_required
+def edit_planned(request, pk):
+    debt = own_debt(request, pk)
+    form = PlannedTransactionForm(request.POST or None, instance=debt)
+    if request.method == "POST" and form.is_valid():
+        messages.success(request, f"Saved: {form.save()}")
+        return redirect("planned")
+    return render(request, "sheetapp/planned_edit.html", {"form": form})
+
+
+@login_required
+def delete_planned(request, pk):
+    """Deleting is only for mistakes; it takes the whole group with it. Paying goes through a payment."""
+    debt = own_debt(request, pk)
+    this = PlannedTransaction.objects.filter(pk=debt.pk)
+    rows = list(this.with_groups().select_related("debtor", "creditor"))
+    # Refused when someone in the group already paid, or a row in it is owed to someone else.
+    problems = [f"{r.debtor} already paid “{r.description}”." for r in rows if r.is_settled]
+    problems += [f"“{r}” is owed to {r.creditor}, not you." for r in rows if r.creditor_id != request.user.pk]
+    if request.method == "POST" and not problems:
+        try:
+            deleted = this.delete_with_groups()[0]
+        except ValidationError as e:  # someone paid in the meantime
+            problems = e.messages
+        else:
+            messages.success(request, f"Deleted {deleted} planned transaction{'s' if deleted != 1 else ''}.")
+            return redirect("planned")
+    return render(request, "sheetapp/planned_delete.html", {"rows": rows, "problems": problems})
 
 
 @login_required
