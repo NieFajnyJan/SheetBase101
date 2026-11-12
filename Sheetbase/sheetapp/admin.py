@@ -1,5 +1,6 @@
-from django.contrib import admin
+from django.contrib import admin, messages
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
+from django.db.models import Q
 
 from .models import PlannedTransaction, Transaction, TransactionCorrection, User
 
@@ -110,11 +111,33 @@ class StatusFilter(admin.SimpleListFilter):
 class PlannedTransactionAdmin(admin.ModelAdmin):
     """Open debts. Open ones can be fixed or deleted here; settled ones are history."""
 
-    list_display = ("description", "amount", "debtor", "creditor", "status", "created_by", "created_at")
+    list_display = ("description", "tag", "amount", "debtor", "creditor", "status", "group_id_short",
+                    "created_by", "created_at")
     list_filter = (StatusFilter, "debtor", "creditor", "created_at")
-    search_fields = ("description",)
+    search_fields = ("description", "tag")
+    actions = ["group_selected", "ungroup_selected"]
     date_hierarchy = "created_at"
     readonly_fields = ("created_by", "created_at", "settled_by", "settled_at", "created_by_payment")
+
+    @admin.display(description="group", ordering="group")
+    def group_id_short(self, obj):
+        return str(obj.group)[:8] if obj.group else "–"
+
+    @admin.action(description="Group selected (deleting one then deletes them all)")
+    def group_selected(self, request, queryset):
+        if queryset.count() < 2:
+            self.message_user(request, "Select at least two planned transactions to group.", messages.ERROR)
+        elif queryset.settled().exists():
+            self.message_user(request, "Settled planned transactions can't be grouped.", messages.ERROR)
+        else:
+            self.message_user(request, f"Grouped {queryset.make_group()} planned transactions.")
+
+    @admin.action(description="Remove selected from their group")
+    def ungroup_selected(self, request, queryset):
+        if queryset.settled().exists():
+            self.message_user(request, "Settled planned transactions can't be changed.", messages.ERROR)
+        else:
+            self.message_user(request, f"Removed {queryset.update(group=None)} from their group.")
 
     @admin.display(description="status", ordering="settled_at")
     def status(self, obj):
@@ -130,3 +153,21 @@ class PlannedTransactionAdmin(admin.ModelAdmin):
         if not change:
             obj.created_by = request.user
         super().save_model(request, obj, form, change)
+
+    # Deleting a planned transaction deletes its whole group.
+    # The confirmation page lists every row that goes; if anyone in the group has already paid,
+    # that row shows up as protected and nothing can be deleted.
+    def get_deleted_objects(self, objs, request):
+        picked = [o.pk for o in objs]
+        group = PlannedTransaction.objects.filter(pk__in=picked).with_groups().select_related("debtor", "creditor")
+        # Settled rows picked directly stay in, so the usual "no permission" check still refuses them.
+        rows = group.filter(Q(pk__in=picked) | Q(settled_by__isnull=True))
+        deleted, counts, perms_needed, protected = super().get_deleted_objects(list(rows), request)
+        paid = [f"{p} – already paid, so the group can't be deleted" for p in group.settled() if p.pk not in picked]
+        return deleted, counts, perms_needed, [*protected, *paid]
+
+    def delete_model(self, request, obj):
+        PlannedTransaction.objects.filter(pk=obj.pk).delete_with_groups()
+
+    def delete_queryset(self, request, queryset):
+        queryset.delete_with_groups()

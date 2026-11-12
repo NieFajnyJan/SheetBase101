@@ -1,9 +1,10 @@
+import uuid
 from decimal import Decimal
 
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models
+from django.db import models, transaction as db_transaction
 from django.db.models import Case, F, OuterRef, Subquery, Value, When
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -217,6 +218,25 @@ class PlannedTransactionQuerySet(models.QuerySet):
     def settled(self):
         return self.filter(settled_by__isnull=False)
 
+    def with_groups(self):
+        """These planned transactions plus every other one in their groups."""
+        groups = self.exclude(group__isnull=True).values("group")
+        return PlannedTransaction.objects.filter(models.Q(pk__in=self.values("pk")) | models.Q(group__in=groups))
+
+    def make_group(self):
+        """Puts these rows into one new group (taking them out of any group they were in)."""
+        return self.update(group=uuid.uuid4())
+
+    def delete_with_groups(self):
+        """Deletes these and everyone else's rows in their groups – all or nothing.
+        Refused when anyone in a group has already paid (settled debts are never deleted)."""
+        with db_transaction.atomic():
+            rows = self.with_groups().select_for_update()
+            paid = rows.settled().select_related("debtor").first()
+            if paid:
+                raise ValidationError(f"{paid.debtor} already paid “{paid.description}”, so it can't be deleted.")
+            return rows.delete()
+
 
 class PlannedTransaction(models.Model):
     """A planned transaction: an open debt – who owes whom, how much, for what and since when.
@@ -236,6 +256,11 @@ class PlannedTransaction(models.Model):
         "amount (zł)", max_digits=10, decimal_places=2, validators=[MinValueValidator(Decimal("0.01"))]
     )
     description = models.CharField(max_length=255, help_text="What it's for.")
+    # Just a label, e.g. "pizza"; it doesn't group anything, so it can be reused.
+    tag = models.CharField(max_length=50, blank=True, help_text="Optional label, e.g. “pizza”.")
+    # The rows of one shared expense (each person who chipped in has their own row) share a generated id,
+    # so deleting one deletes them all. Empty: the row stands alone.
+    group = models.UUIDField(null=True, blank=True, editable=False, db_index=True)
     created_by = models.ForeignKey(
         User, on_delete=models.PROTECT, related_name="created_planned_transactions", editable=False
     )

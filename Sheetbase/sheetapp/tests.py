@@ -1056,3 +1056,76 @@ class PlannedTransactionAdminTests(TestCase):
         self.client.post(changelist, {"action": "delete_selected", "_selected_action": [open_debt.pk], "post": "yes"})
         self.assertEqual(list(PlannedTransaction.objects.all()), [paid])
 
+
+# --------------------------------------------------------------------------- Planned transaction groups
+class PlannedGroupTests(TestCase):
+    """Rows of one shared expense share a generated group id: deleting one deletes them all."""
+
+    def setUp(self):
+        self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.ewa = User.objects.create_user("ewa", "ewa@example.com")
+        self.client.force_login(self.boss)
+        self.changelist = reverse("admin:sheetapp_plannedtransaction_changelist")
+
+    def debt(self, debtor, tag="pizza", **fields):
+        return PlannedTransaction.objects.create(debtor=debtor, creditor=self.boss, amount=Decimal("1.00"),
+                                                 description="Pizza", tag=tag, created_by=self.boss, **fields)
+
+    def group(self, *rows):
+        PlannedTransaction.objects.filter(pk__in=[r.pk for r in rows]).make_group()
+
+    def delete_url(self, p):
+        return reverse("admin:sheetapp_plannedtransaction_delete", args=[p.pk])
+
+    def action(self, name, *rows):
+        return self.client.post(self.changelist, {"action": name, "_selected_action": [r.pk for r in rows]},
+                                follow=True)
+
+    def test_deleting_one_deletes_the_group(self):
+        ola, ewa = self.debt(self.ola), self.debt(self.ewa)
+        last_week_ola, last_week_ewa = self.debt(self.ola), self.debt(self.ewa)  # same tag, another group
+        alone = self.debt(self.ola)
+        self.group(ola, ewa)
+        self.group(last_week_ola, last_week_ewa)
+        self.assertContains(self.client.get(self.delete_url(ola)), "ewa owes boss")  # everyone affected is listed
+        self.client.post(self.delete_url(ola), {"post": "yes"})
+        self.assertEqual(set(PlannedTransaction.objects.all()), {last_week_ola, last_week_ewa, alone})
+
+    def test_ungrouped_row_deleted_alone(self):
+        alone, kept = self.debt(self.ola), self.debt(self.ewa)  # same tag, but tags don't group
+        self.client.post(self.delete_url(alone), {"post": "yes"})
+        self.assertEqual(list(PlannedTransaction.objects.all()), [kept])
+
+    def test_group_with_a_paid_row_cant_be_deleted(self):
+        pay = Transaction.objects.create(amount=Decimal("1.00"), payer=self.ewa, recipient=self.boss,
+                                         created_by=self.boss, description="Zwrot")
+        ola = self.debt(self.ola)
+        ewa = self.debt(self.ewa)
+        self.group(ola, ewa)
+        PlannedTransaction.objects.filter(pk=ewa.pk).update(settled_by=pay, settled_at=timezone.now())
+        self.assertContains(self.client.get(self.delete_url(ola)), "already paid")
+        self.client.post(self.delete_url(ola), {"post": "yes"})
+        self.client.post(self.changelist, {"action": "delete_selected", "_selected_action": [ola.pk], "post": "yes"})
+        self.assertEqual(PlannedTransaction.objects.count(), 2)
+        with self.assertRaises(ValidationError):
+            PlannedTransaction.objects.filter(pk=ola.pk).delete_with_groups()
+
+    def test_group_and_ungroup_actions(self):
+        ola, ewa, other = self.debt(self.ola), self.debt(self.ewa), self.debt(self.ola)
+        self.assertContains(self.action("group_selected", ola), "at least two")
+        self.assertContains(self.action("group_selected", ola, ewa), "Grouped 2")
+        ola, ewa, other = (PlannedTransaction.objects.get(pk=r.pk) for r in (ola, ewa, other))
+        self.assertIsNotNone(ola.group)
+        self.assertEqual(ola.group, ewa.group)
+        self.assertIsNone(other.group)
+        self.action("ungroup_selected", ewa)
+        self.assertIsNone(PlannedTransaction.objects.get(pk=ewa.pk).group)
+
+    def test_settled_rows_cant_be_grouped(self):
+        pay = Transaction.objects.create(amount=Decimal("1.00"), payer=self.ewa, recipient=self.boss,
+                                         created_by=self.boss, description="Zwrot")
+        ola = self.debt(self.ola)
+        paid = self.debt(self.ewa, settled_by=pay, settled_at=timezone.now())
+        self.assertContains(self.action("group_selected", ola, paid), "can&#x27;t be grouped")
+        self.assertIsNone(PlannedTransaction.objects.get(pk=ola.pk).group)
