@@ -6,29 +6,42 @@
 {% block extra_head %}
 <style>
   .covers { list-style: none; padding: 0; margin: .5rem 0 1rem; }
-  .covers li { display: flex; justify-content: space-between; gap: 1rem; padding: .35rem 0; border-bottom: 1px dashed #dde; }
+  .covers li { border-bottom: 1px dashed #dde; }
+  .covers label { display: flex; align-items: baseline; gap: .6rem; font-weight: 400; margin: 0; padding: .4rem 0; cursor: pointer; }
+  .covers .what { flex: 1; }
+  .covers .status { display: block; font-size: .85rem; color: #777; }
+  .covers .status.paid { color: #1e7a3c; }
+  .covers .status.partly, .covers .status.ran_out { color: #a05a00; }
   .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .leftover { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; }
-  .actions { display: flex; gap: .6rem; margin-top: 1.2rem; }
+  .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
   .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
 </style>
 {% endblock %}
 
 {% block content %}
-  <form class="card" method="post">
+  <form class="card" method="post" id="confirm-form">
     {% csrf_token %}
     {% for field in form %}{{ field.as_hidden }}{% endfor %}
     <input type="hidden" name="plan" value="{{ plan.signature }}">
+    <input type="hidden" name="choosing" value="1">
 
     <h2>Confirm payment</h2>
     <p><strong>{{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
-    {% if plan.covered %}
-      <p>This payment of {{ payment.amount|zl }} covers:</p>
+    {% if plan.debts %}
+      <p>What is this payment of {{ payment.amount|zl }} for? Untick anything it isn't paying.</p>
       <ul class="covers">
-        {% for debt in plan.covered %}
-          <li><span>{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}</span>
-            <span class="num">{{ debt.amount|zl }}</span></li>
+        {% for debt, ticked, status in plan.rows %}
+          <li><label>
+            <input type="checkbox" name="debts" value="{{ debt.pk }}"{% if ticked %} checked{% endif %}>
+            <span class="what">{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}
+              {% if status == "paid" %}<span class="status paid">paid</span>
+              {% elif status == "partly" %}<span class="status partly">paid, but {{ plan.leftover.amount|zl }} of it stays owed</span>
+              {% elif status == "ran_out" %}<span class="status ran_out">not paid – the money ran out</span>{% endif %}
+            </span>
+            <span class="num">{{ debt.amount|zl }}</span>
+          </label></li>
         {% endfor %}
       </ul>
     {% else %}
@@ -47,7 +60,17 @@
     <p class="muted">Nothing is saved until you click Confirm.</p>
     <div class="actions">
       <button class="btn" name="confirm">Confirm</button>
+      {% if plan.debts %}<button class="btn btn-secondary" name="recalculate" id="recalculate">Update</button>{% endif %}
       <button class="btn btn-secondary" name="back">Back</button>
     </div>
   </form>
+  <script>
+    // Ticking or unticking a debt recalculates straight away (the Update button does the same without JavaScript).
+    const recalc = document.getElementById("recalculate");
+    if (recalc) {
+      recalc.hidden = true;
+      document.querySelectorAll('input[name="debts"]').forEach(box =>
+        box.addEventListener("change", () => box.form.requestSubmit(recalc)));
+    }
+  </script>
 {% endblock %}

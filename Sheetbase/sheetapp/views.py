@@ -69,19 +69,24 @@ def transactions(request):
 
 
 def confirm_payment(request, form, payment):
-    """A payment between members: first shows which debts it settles and what's left over;
-    saves only when Confirm is clicked."""
+    """A payment between members: first shows which debts it settles and what's left over, with a
+    tick box per debt to choose what it's for; saves only when Confirm is clicked."""
+    # On the screen itself the ticks decide (none ticked is a valid choice); arriving from the form,
+    # the debts are picked automatically.
+    chosen = None
+    if "choosing" in request.POST:
+        chosen = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
     plan = None
     if "confirm" in request.POST:
         try:
-            record_payment(payment, expected_signature=request.POST.get("plan", ""))
+            record_payment(payment, chosen=chosen, expected_signature=request.POST.get("plan", ""))
         except PlanChanged as changed:
             plan = changed.plan
-            messages.warning(request, "The debts changed in the meantime – please check again.")
+            messages.warning(request, "What this payment covers has changed – please check it again.")
         else:
             messages.success(request, f"Added: {payment}")
             return redirect(request.get_full_path())
-    plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description)
+    plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
     return render(request, "sheetapp/confirm_payment.html", {"form": form, "payment": payment, "plan": plan})
 
 
