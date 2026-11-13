@@ -30,7 +30,7 @@
     <p><strong>{{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
     {% if plan.debts %}
-      <p>What is this payment of {{ payment.amount|zl }} for? Untick anything it isn't paying.</p>
+      <p>What is this payment of {{ payment.amount|zl }} for? The oldest debts are ticked, as far as the money goes; change the ticks if it's for something else.</p>
       <ul class="covers">
         {% for debt, ticked, status in plan.rows %}
           <li><label>
