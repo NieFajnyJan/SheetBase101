@@ -50,7 +50,11 @@
     <form class="card form-card" method="post">
       {% csrf_token %}
       <h2>Add done transaction</h2>
-      <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
+      {% if paying %}
+        <p class="msg">Marking as paid: <strong>{{ paying }}</strong>. Check the details, then click Add.</p>
+      {% else %}
+        <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
+      {% endif %}
       {{ form.as_p }}
       <button class="btn">Add</button>
     </form>

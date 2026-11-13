@@ -53,7 +53,10 @@
               <td>{{ d.debtor }}</td><td>{{ d.creditor }}</td>
               <td class="desc">{{ d.description }}{% if d.tag %} <span class="tag">{{ d.tag }}</span>{% endif %}</td>
               <td class="num">{{ d.amount|zl }}</td><td>{{ d.created_at|date:"d/m/y" }}</td>
-              <td class="actions">{% if d.creditor_id == user.pk %}<a href="{% url 'edit_planned' d.pk %}">Edit</a><a href="{% url 'delete_planned' d.pk %}">Delete</a>{% endif %}</td>
+              <td class="actions">
+                {% if d.debtor_id == user.pk or d.creditor_id == user.pk %}<a href="{% url 'transactions' %}?pay={{ d.pk }}">Mark paid</a>{% endif %}
+                {% if d.creditor_id == user.pk %}<a href="{% url 'edit_planned' d.pk %}">Edit</a><a href="{% url 'delete_planned' d.pk %}">Delete</a>{% endif %}
+              </td>
             </tr>
           {% endfor %}
         </tbody>

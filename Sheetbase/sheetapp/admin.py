@@ -3,7 +3,7 @@ from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 from django.db.models import Q
 
 from .models import PlannedTransaction, Transaction, TransactionCorrection, User, needs_matching
-from .payments import record_payment
+from .payments import mark_paid, record_payment
 
 
 @admin.register(User)
@@ -120,7 +120,7 @@ class PlannedTransactionAdmin(admin.ModelAdmin):
                     "created_by", "created_at")
     list_filter = (StatusFilter, "debtor", "creditor", "created_at")
     search_fields = ("description", "tag")
-    actions = ["group_selected", "ungroup_selected"]
+    actions = ["mark_selected_paid", "group_selected", "ungroup_selected"]
     date_hierarchy = "created_at"
     readonly_fields = ("created_by", "created_at", "settled_by", "settled_at", "created_by_payment")
 
@@ -136,6 +136,15 @@ class PlannedTransactionAdmin(admin.ModelAdmin):
             self.message_user(request, "Settled planned transactions can't be grouped.", messages.ERROR)
         else:
             self.message_user(request, f"Grouped {queryset.make_group()} planned transactions.")
+
+    @admin.action(description="Mark selected as paid (one payment per pair)")
+    def mark_selected_paid(self, request, queryset):
+        if queryset.settled().exists():
+            self.message_user(request, "Some of the selected are already paid; nothing was recorded.", messages.ERROR)
+            return
+        payments = mark_paid(queryset, created_by=request.user)
+        self.message_user(request, f"Recorded {len(payments)} payment{'s' if len(payments) != 1 else ''}: "
+                          + "; ".join(str(p) for p in payments))
 
     @admin.action(description="Remove selected from their group")
     def ungroup_selected(self, request, queryset):

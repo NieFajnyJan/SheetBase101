@@ -1528,3 +1528,108 @@ class PlannedPageTests(TestCase):
         PlannedTransaction.objects.filter(pk__in=[b.pk, not_mine.pk]).make_group()
         self.assertContains(self.client.post(self.delete_url(b)), "is owed to ewa, not you")
         self.assertEqual(PlannedTransaction.objects.count(), 4)
+
+
+# --------------------------------------------------------------------------- Mark paid
+class MarkPaidTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.ewa = User.objects.create_user("ewa", "ewa@example.com")
+        self.url = reverse("transactions")
+
+    def debt(self, amount="890.00", debtor=None, creditor=None, description="Tort"):
+        return PlannedTransaction.objects.create(debtor=debtor or self.ola, creditor=creditor or self.jan,
+                                                 amount=Decimal(amount), description=description, created_by=self.jan)
+
+    def pay_url(self, d):
+        return f"{self.url}?pay={d.pk}"
+
+    def data(self, d, **extra):
+        return {"amount": str(d.amount), "payer": d.debtor.pk, "recipient": d.creditor.pk,
+                "description": d.description, "date": today().strftime("%d/%m/%y"), **extra}
+
+    def mark_paid(self, d):
+        """Opens Mark paid, submits the filled-in form, then confirms."""
+        screen = self.client.post(self.pay_url(d), self.data(d))
+        self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+        return self.client.post(self.pay_url(d), self.data(d, confirm="", plan=screen.context["plan"].signature()))
+
+    def test_button_shown_to_debtor_and_creditor_only(self):
+        d = self.debt()
+        for who, shown in ((self.ola, True), (self.jan, True), (self.ewa, False)):
+            self.client.force_login(who)
+            page = self.client.get(reverse("planned"))
+            (self.assertContains if shown else self.assertNotContains)(page, self.pay_url(d))
+
+    def test_form_filled_in_from_the_debt(self):
+        d = self.debt()
+        self.client.force_login(self.ola)
+        page = self.client.get(self.pay_url(d))
+        form = page.context["form"]
+        self.assertEqual((form["payer"].value(), form["recipient"].value(), form["amount"].value(),
+                          form["description"].value(), form["date"].value()),
+                         (self.ola.pk, self.jan.pk, Decimal("890.00"), "Tort", today()))
+        self.assertContains(page, "Marking as paid")
+
+    def test_marks_that_debt_paid_and_returns_to_planned(self):
+        # Another debt of the same amount is older, but the one clicked is the one that gets paid.
+        older = self.debt(description="Inny tort")
+        d = self.debt()
+        self.client.force_login(self.jan)  # the creditor records it
+        screen = self.client.post(self.pay_url(d), self.data(d))
+        self.assertEqual([(r.pk, ticked) for r, ticked, _ in screen.context["plan"].rows()],
+                         [(older.pk, False), (d.pk, True)])
+        self.assertRedirects(self.mark_paid(d), reverse("planned"))
+        pay = Transaction.objects.get()
+        d.refresh_from_db()
+        older.refresh_from_db()
+        self.assertEqual((d.settled_by, older.is_settled), (pay, False))
+        self.assertEqual((pay.payer, pay.recipient, pay.amount, pay.created_by),
+                         (self.ola, self.jan, Decimal("890.00"), self.jan))
+        self.assertNotContains(self.client.get(reverse("planned")), self.pay_url(d))
+
+    def test_clicking_confirm_twice_records_one_payment(self):
+        d = self.debt()
+        self.client.force_login(self.ola)
+        screen = self.client.post(self.pay_url(d), self.data(d))
+        confirm = self.data(d, confirm="", plan=screen.context["plan"].signature())
+        self.client.post(self.pay_url(d), confirm)
+        response = self.client.post(self.pay_url(d), confirm)
+        self.assertRedirects(response, reverse("planned"))
+        self.assertEqual(Transaction.objects.count(), 1)
+
+    def test_others_cant_mark_paid(self):
+        d = self.debt()
+        self.client.force_login(self.ewa)
+        self.assertEqual(self.client.get(self.pay_url(d)).status_code, 403)
+        self.assertEqual(self.client.post(self.pay_url(d), self.data(d)).status_code, 403)
+        self.assertEqual(self.client.get(f"{self.url}?pay=abc").status_code, 404)
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_admin_marks_selected_paid_one_payment_per_pair(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        a = self.debt("10.00", description="Kawa")
+        b = self.debt("5.50", description="Ciastko")
+        c = self.debt("7.00", debtor=self.ewa, description="Kawa")
+        untouched = self.debt("1.00", description="Woda")
+        self.client.force_login(boss)
+        changelist = reverse("admin:sheetapp_plannedtransaction_changelist")
+        self.client.post(changelist, {"action": "mark_selected_paid", "_selected_action": [a.pk, b.pk, c.pk]})
+        payments = {(p.payer, p.amount, p.description) for p in Transaction.objects.all()}
+        self.assertEqual(payments, {(self.ola, Decimal("15.50"), "Kawa, Ciastko"), (self.ewa, Decimal("7.00"), "Kawa")})
+        self.assertEqual(set(PlannedTransaction.objects.open()), {untouched})
+        self.assertFalse(PlannedTransaction.objects.filter(created_by_payment__isnull=False).exists())  # exact
+
+    def test_admin_refuses_when_some_already_paid(self):
+        boss = User.objects.create_superuser("boss", "boss@example.com", "x")
+        pay = Transaction.objects.create(amount=Decimal("1.00"), payer=self.ola, recipient=self.jan,
+                                         created_by=boss, description="Zwrot")
+        a = self.debt("10.00")
+        paid = self.debt("1.00")
+        PlannedTransaction.objects.filter(pk=paid.pk).update(settled_by=pay, settled_at=timezone.now())
+        self.client.force_login(boss)
+        page = self.client.post(reverse("admin:sheetapp_plannedtransaction_changelist"),
+                                {"action": "mark_selected_paid", "_selected_action": [a.pk, paid.pk]}, follow=True)
+        self.assertContains(page, "already paid; nothing was recorded")
+        self.assertEqual(Transaction.objects.count(), 1)

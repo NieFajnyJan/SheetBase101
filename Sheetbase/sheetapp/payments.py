@@ -132,6 +132,22 @@ def record_payment(payment: Transaction, chosen=None, expected_signature=None) -
     return plan
 
 
+def mark_paid(debts, created_by):
+    """Records that these open debts were paid: one payment per debtor → creditor pair, for exactly
+    what that pair's debts add up to, settling them. All at once or not at all. Returns the payments."""
+    pairs = {}
+    for debt in debts.select_related("debtor", "creditor").order_by("created_at", "pk"):
+        pairs.setdefault((debt.debtor, debt.creditor), []).append(debt)
+    payments = []
+    with db_transaction.atomic():
+        for (debtor, creditor), rows in pairs.items():
+            payment = Transaction(payer=debtor, recipient=creditor, amount=sum(d.amount for d in rows),
+                                  description=_clip(", ".join(d.description for d in rows)), created_by=created_by)
+            record_payment(payment, chosen={d.pk for d in rows})
+            payments.append(payment)
+    return payments
+
+
 def check_can_undo(payment: Transaction):
     """Cancelling removes the leftover a payment created – impossible once that leftover is paid."""
     if payment.leftovers.settled().exists():

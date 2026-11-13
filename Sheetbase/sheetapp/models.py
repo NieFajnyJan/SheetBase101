@@ -337,6 +337,10 @@ class PlannedTransaction(models.Model):
     def is_settled(self):
         return self.settled_by_id is not None
 
+    def can_be_marked_paid_by(self, user):
+        """Either side of a debt may record that it was paid – nobody else."""
+        return user.pk in (self.debtor_id, self.creditor_id)
+
     def can_be_changed_by(self, user):
         """Only the creditor (the one owed the money) may edit or delete a debt – never the debtor –
         and only while it's open."""
