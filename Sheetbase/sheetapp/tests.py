@@ -1161,12 +1161,42 @@ class PayingDebtsTests(TestCase):
         self.assertEqual((left.debtor, left.creditor, left.amount, left.description, left.tag, left.group),
                          (self.ola, self.jan, Decimal("10.00"), "Krzesło – rest", "krzesła", None))
 
-    def test_several_debts_oldest_first(self):
+    def ticked(self, amount):
+        """Which debts the confirmation screen ticks by itself for a payment of this amount."""
+        screen = self.client.post(self.url, self.data(amount))
+        return [d for d, ticked, _ in screen.context["plan"].rows() if ticked]
+
+    def test_oldest_debts_are_ticked(self):
         old, middle, new = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
+        self.assertEqual(self.ticked("60.00"), [old, middle])
         pay = self.pay("60.00")
         old, middle, new = self.refresh(old, middle, new)
         self.assertEqual([old.is_settled, middle.is_settled, new.is_settled], [True, True, False])
         self.assertEqual(self.leftover(pay).amount, Decimal("20.00"))  # 30 + 50 – 60, still owed by ola
+
+    def test_debts_paid_in_full_are_all_ticked(self):
+        # Jan Kowal owed 100 + 100 + 98 and paid 298.
+        a, b, c = self.debt("100.00"), self.debt("100.00"), self.debt("98.00")
+        self.assertEqual(self.ticked("298.00"), [a, b, c])
+        self.assertEqual(self.ticked("200.00"), [a, b])
+        self.assertEqual(self.ticked("500.00"), [a, b, c])  # overpaid: everything owed is ticked
+
+    def test_an_equal_newer_debt_does_not_jump_the_queue(self):
+        old, new = self.debt("100.00"), self.debt("890.00")
+        self.assertEqual(self.ticked("890.00"), [old, new])
+
+    def test_small_payment_towards_a_big_debt_ticks_it(self):
+        big = self.debt("1000.00")
+        self.assertEqual(self.ticked("10.00"), [big])
+
+    def test_debts_added_at_the_same_moment_go_in_saving_order(self):
+        first, second, third = self.debt("30.00"), self.debt("30.00"), self.debt("30.00")
+        PlannedTransaction.objects.update(created_at=first.created_at)
+        self.assertEqual(self.ticked("60.00"), [first, second])
+        self.assertEqual(self.ticked("60.00"), [first, second])  # and every time
+
+    def test_nothing_owed_ticks_nothing(self):
+        self.assertEqual(self.ticked("50.00"), [])
 
     def test_nothing_owed_is_a_loan(self):
         pay = self.pay("50.00")
@@ -1192,17 +1222,14 @@ class PayingDebtsTests(TestCase):
         return self.client.post(self.url, self.data(amount, choosing="1", debts=[d.pk for d in debts],
                                                     plan=plan.signature(), **{button: ""}, **kwargs))
 
-    def test_exact_match_is_picked_over_oldest(self):
-        # Jan's case: he owed 100 + 98 + 890 and paid 890 for the tort.
+    def test_newer_debt_can_be_ticked_instead(self):
+        # Jan's case: he owed 100 + 98 + 890 and paid 890 for the tort, so he ticks just the tort.
         old, older = self.debt("100.00", description="za cokolwiek"), self.debt("98.00", description="retoryka")
         tort = self.debt("890.00", description="tort")
-        screen = self.client.post(self.url, self.data("890.00"))
-        self.assertEqual([(d.pk, ticked) for d, ticked, _ in screen.context["plan"].rows()],
-                         [(old.pk, False), (older.pk, False), (tort.pk, True)])
-        pay = self.pay("890.00")
+        self.assertRedirects(self.choose("890.00", [tort]), self.url)
         old, older, tort = self.refresh(old, older, tort)
         self.assertEqual([old.is_settled, older.is_settled, tort.is_settled], [False, False, True])
-        self.assertFalse(pay.leftovers.exists())
+        self.assertFalse(Transaction.objects.get().leftovers.exists())
 
     def test_pick_which_debts(self):
         a, b, c = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
@@ -1235,7 +1262,7 @@ class PayingDebtsTests(TestCase):
 
     def test_ticks_changed_without_update_shows_screen_again(self):
         a, b = self.debt("30.00"), self.debt("50.00")
-        screen = self.client.post(self.url, self.data("30.00"))  # a is picked (exact match)
+        screen = self.client.post(self.url, self.data("30.00"))  # a is picked (oldest)
         page = self.client.post(self.url, self.data("30.00", choosing="1", debts=[b.pk], confirm="",
                                                     plan=screen.context["plan"].signature()))
         self.assertContains(page, "please check it again")

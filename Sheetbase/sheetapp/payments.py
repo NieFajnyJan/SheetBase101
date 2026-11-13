@@ -1,5 +1,6 @@
 """Paying debts: a done transaction between two members settles what the payer owes the person
-paid, oldest first, and whatever doesn't match exactly becomes a new planned transaction (a leftover).
+paid – oldest first unless the payer ticks others – and whatever doesn't match
+exactly becomes a new planned transaction (a leftover).
 Purchases and returns (anything to or from a shop) never touch debts."""
 
 from dataclasses import dataclass, field
@@ -63,11 +64,8 @@ def _clip(text):
 
 
 def default_choice(debts, amount):
-    """Which debts a payment is for when nobody picked: a debt of exactly that amount if there is one
-    (the oldest such), otherwise oldest first until the money runs out."""
-    exact = next((d for d in debts if d.amount == amount), None)
-    if exact:
-        return {exact.pk}
+    """Which debts a payment is for when nobody picked: oldest first (`debts` come in that order)
+    until the money runs out, the last one perhaps only partly."""
     chosen, remaining = set(), amount
     for debt in debts:
         if remaining <= 0:
@@ -80,6 +78,8 @@ def default_choice(debts, amount):
 def plan_payment(payer, recipient, amount, description, chosen=None, lock=False) -> PaymentPlan:
     """Matches a payment of `amount` from payer to recipient against payer's open debts to recipient.
     `chosen`: ids of the debts it's for (others are ignored); None picks them automatically."""
+    # Oldest first; debts added at the same moment go in the order they were saved, so the same
+    # payment always picks the same debts.
     debts = (PlannedTransaction.objects.open().filter(debtor=payer, creditor=recipient)
              .order_by("created_at", "pk"))
     if lock:
