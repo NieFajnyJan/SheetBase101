@@ -155,6 +155,16 @@ def check_can_undo(payment: Transaction):
                               "Cancel that later payment first.")
 
 
+def correct_loan(payment: Transaction, correction):
+    """A payment that only made a loan was corrected: the loan follows the new amount, people and description."""
+    loan = payment.leftovers.select_for_update().get()
+    if loan.is_settled:
+        raise ValidationError("This loan has already been paid back, so the payment can't be corrected.")
+    loan.debtor, loan.creditor = correction.recipient, correction.payer
+    loan.amount, loan.description = correction.amount, _clip(correction.description)
+    loan.save()
+
+
 def undo_payment(payment: Transaction):
     """When a payment is cancelled: removes the leftover it created and reopens the debts it settled."""
     with db_transaction.atomic():

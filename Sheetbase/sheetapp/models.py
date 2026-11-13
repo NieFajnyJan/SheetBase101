@@ -155,6 +155,10 @@ class Transaction(models.Model):
         """Whether this payment settled planned transactions or created a leftover."""
         return self.settled_debts.exists() or self.leftovers.exists()
 
+    def is_loan(self):
+        """A payment between members that paid no debts: all of it became a debt the other way."""
+        return not self.settled_debts.exists() and self.leftovers.exists()
+
     def can_be_corrected_by(self, user):
         """Only whoever added the transaction can correct or cancel it, and not once it's cancelled."""
         return user.pk == self.created_by_id and not self.is_cancelled
@@ -218,22 +222,42 @@ class TransactionCorrection(models.Model):
             check_can_undo(self.original)
         elif self.payer_id and self.recipient_id:
             current = self.original.current
-            if any(getattr(self, f) != getattr(current, f) for f in MONEY_FIELDS) and (
+            if self.original.is_loan():
+                # Paid no debts, so the loan can simply follow the correction – unless it's been paid back.
+                if self.changes_money():
+                    from .payments import check_can_undo
+
+                    check_can_undo(self.original)
+                    if not needs_matching(self.payer, self.recipient):
+                        raise ValidationError("A payment between members can't be corrected into a purchase. "
+                                              "Cancel it and add the purchase instead.")
+            elif self.changes_money() and (
                     self.original.touches_debts()
                     # A purchase corrected into a payment between members would skip paying debts.
                     or needs_matching(self.payer, self.recipient) and not needs_matching(current.payer, current.recipient)):
                 raise ValidationError("This payment pays debts between members, so its amount, “paid by” and "
                                       "“paid to” can't be changed. Cancel it and add it again instead.")
 
+    def changes_money(self):
+        current = self.original.current
+        return any(getattr(self, f) != getattr(current, f) for f in MONEY_FIELDS)
+
     def save(self, *args, **kwargs):
         if not self._state.adding:
             raise ValueError("A correction can't be edited.")
         with db_transaction.atomic():
+            # Only when something the loan copies changed, so a date fix keeps edits made to the loan itself.
+            correcting_loan = not self.cancelled and self.original.is_loan() and (
+                self.changes_money() or self.description != self.original.current.description)
             super().save(*args, **kwargs)
             if self.cancelled:
                 from .payments import undo_payment
 
                 undo_payment(self.original)
+            elif correcting_loan:
+                from .payments import correct_loan
+
+                correct_loan(self.original, self)
 
     def delete(self, *args, **kwargs):
         raise ValueError("A correction can't be deleted.")
