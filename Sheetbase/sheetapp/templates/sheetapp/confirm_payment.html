@@ -9,11 +9,12 @@
   .covers li { border-bottom: 1px dashed #dde; }
   .covers label { display: flex; align-items: baseline; gap: .6rem; font-weight: 400; margin: 0; padding: .4rem 0; cursor: pointer; }
   .covers .what { flex: 1; }
-  .covers .status { display: block; font-size: .85rem; color: #777; }
+  .covers .status { display: block; min-height: 1.3em; font-size: .85rem; color: #777; }
   .covers .status.paid { color: #1e7a3c; }
   .covers .status.partly, .covers .status.ran_out { color: #a05a00; }
   .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .leftover { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; }
+  .leftover { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; min-height: 2.6em; }
+  .leftover .muted { display: block; }
   .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
   .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
 </style>
@@ -38,7 +39,8 @@
             <span class="what">{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}
               {% if status == "paid" %}<span class="status paid">paid</span>
               {% elif status == "partly" %}<span class="status partly">paid, but {{ plan.leftover.amount|zl }} of it stays owed</span>
-              {% elif status == "ran_out" %}<span class="status ran_out">not paid – the money ran out</span>{% endif %}
+              {% elif status == "ran_out" %}<span class="status ran_out">not paid – the money ran out</span>
+              {% else %}<span class="status">&nbsp;</span>{% endif %}
             </span>
             <span class="num">{{ debt.amount|zl }}</span>
           </label></li>
@@ -51,26 +53,40 @@
     {% with left=plan.leftover %}
       {% if left %}
         <p class="leftover">Leftover: <strong>{{ left.debtor }} owes {{ left.creditor }} {{ left.amount|zl }}</strong>
-          <span class="muted">– {{ left.description }}</span></p>
+          <span class="muted">{{ left.description }}</span></p>
       {% else %}
-        <p class="leftover">No leftover – the debts are paid exactly.</p>
+        <p class="leftover">No leftover<span class="muted">The debts are paid exactly.</span></p>
       {% endif %}
     {% endwith %}
 
     <p class="muted">Nothing is saved until you click Confirm.</p>
     <div class="actions">
       <button class="btn" name="confirm">Confirm</button>
-      {% if plan.debts %}<button class="btn btn-secondary" name="recalculate" id="recalculate">Update</button>{% endif %}
       <button class="btn btn-secondary" name="back">Back</button>
+      {% if plan.debts %}<button class="btn btn-secondary" name="recalculate" id="recalculate">Update</button>{% endif %}
     </div>
   </form>
   <script>
     // Ticking or unticking a debt recalculates straight away (the Update button does the same without JavaScript).
+    // The page reloads, so it comes back at the same scroll position with the same tick box focused.
     const recalc = document.getElementById("recalculate");
     if (recalc) {
       recalc.hidden = true;
+      try {
+        const kept = JSON.parse(sessionStorage.getItem("confirm-payment") || "null");
+        sessionStorage.removeItem("confirm-payment");
+        if (kept) {
+          window.scrollTo(0, kept.y);
+          document.querySelector(`input[name="debts"][value="${kept.debt}"]`)?.focus({ preventScroll: true });
+        }
+      } catch (e) {}
       document.querySelectorAll('input[name="debts"]').forEach(box =>
-        box.addEventListener("change", () => box.form.requestSubmit(recalc)));
+        box.addEventListener("change", () => {
+          try {
+            sessionStorage.setItem("confirm-payment", JSON.stringify({ y: window.scrollY, debt: box.value }));
+          } catch (e) {}
+          box.form.requestSubmit(recalc);
+        }));
     }
   </script>
 {% endblock %}
