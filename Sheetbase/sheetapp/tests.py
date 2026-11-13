@@ -1278,6 +1278,39 @@ class PayingDebtsTests(TestCase):
         self.assertFalse(pay.corrections.exists())
         self.assertRedirects(self.client.post(url, {**fix, "description": "Zwrot za fotel"}), self.url)
 
+    def test_loan_follows_a_correction(self):
+        pay = self.pay("100.00")  # owed nothing: jan now owes ola 100
+        url = reverse("correct_transaction", args=[pay.pk])
+        fix = {**self.data("100.00"), "reason": "typo"}
+        self.assertRedirects(self.client.post(url, {**fix, "amount": "120.00", "description": "Pożyczka"}), self.url)
+        loan = self.leftover(pay)
+        self.assertEqual((loan.debtor, loan.creditor, loan.amount, loan.description),
+                         (self.jan, self.ola, Decimal("120.00"), "Pożyczka"))
+        self.assertRedirects(self.client.post(url, {**fix, "amount": "120.00", "description": "Pożyczka",
+                                                    "recipient": self.ewa.pk}), self.url)
+        self.assertEqual(self.leftover(pay).debtor, self.ewa)
+
+    def test_loan_correction_keeps_edits_to_the_loan_when_only_the_date_changes(self):
+        pay = self.pay("100.00")
+        PlannedTransaction.objects.filter(pk=self.leftover(pay).pk).update(description="Na taksówkę")
+        url = reverse("correct_transaction", args=[pay.pk])
+        from datetime import timedelta
+
+        yesterday = (today() - timedelta(days=1)).strftime("%d/%m/%y")
+        self.assertRedirects(self.client.post(url, {**self.data("100.00"), "date": yesterday, "reason": "x"}), self.url)
+        self.assertEqual(self.leftover(pay).description, "Na taksówkę")
+
+    def test_loan_cant_be_corrected_once_paid_back_or_into_a_purchase(self):
+        pay = self.pay("50.00")
+        url = reverse("correct_transaction", args=[pay.pk])
+        fix = {**self.data("50.00"), "reason": "typo"}
+        self.assertContains(self.client.post(url, {**fix, "recipient": self.shop.pk}), "into a purchase")
+        self.client.force_login(self.jan)
+        self.pay("50.00", payer=self.jan, recipient=self.ola)  # jan pays the loan back
+        self.client.force_login(self.ola)
+        self.assertContains(self.client.post(url, {**fix, "amount": "60.00"}), "Cancel that later payment first")
+        self.assertFalse(pay.corrections.exists())
+
     def test_purchase_cant_be_corrected_into_a_payment_between_members(self):
         d = self.debt("90.00")
         self.client.post(self.url, self.data("90.00", recipient=self.shop))
