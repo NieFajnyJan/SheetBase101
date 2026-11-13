@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Sum
+from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
@@ -35,7 +36,15 @@ def login_page(request):
 def transactions(request):
     """One page: add a done transaction, add a missing shop, and see all done transactions
     with their total, optionally filtered."""
-    form = TransactionForm(initial={"payer": request.user})
+    paying = debt_to_mark_paid(request)
+    if paying and paying.is_settled:  # e.g. Confirm clicked twice: the first click already paid it
+        messages.info(request, f"Already paid: {paying}")
+        return redirect("planned")
+    if paying:  # Mark paid: the form filled in from the debt
+        form = TransactionForm(initial={"payer": paying.debtor, "recipient": paying.creditor,
+                                        "amount": paying.amount, "description": paying.description})
+    else:
+        form = TransactionForm(initial={"payer": request.user})
     shop_form = ShopForm()
 
     if request.method == "POST" and "add_shop" in request.POST:
@@ -52,7 +61,7 @@ def transactions(request):
                 obj.save()
                 messages.success(request, f"Added: {obj}")
                 return redirect(request.get_full_path())
-            return confirm_payment(request, form, obj)
+            return confirm_payment(request, form, obj, paying)
 
     filter_form = HistoryFilterForm(request.GET)
     done = transactions_with_history().order_by("-cur_date", "-created_at")
@@ -60,6 +69,7 @@ def transactions(request):
         done = filter_form.filter(done)
     return render(request, "sheetapp/transactions.html", {
         "form": form,
+        "paying": paying,
         "shop_form": shop_form,
         "filter_form": filter_form,
         "filtered": any(request.GET.get(f) for f in filter_form.fields),
@@ -68,12 +78,25 @@ def transactions(request):
     })
 
 
-def confirm_payment(request, form, payment):
+def debt_to_mark_paid(request):
+    """Mark paid opens this page with ?pay=<debt>: the debt, if the user is one of its two sides."""
+    pk = request.GET.get("pay", "")
+    if not pk:
+        return None
+    if not pk.isdigit():
+        raise Http404
+    debt = get_object_or_404(PlannedTransaction.objects.select_related("debtor", "creditor"), pk=pk)
+    if not debt.can_be_marked_paid_by(request.user):
+        raise PermissionDenied("Only the person who owes or is owed the money can mark it as paid.")
+    return debt
+
+
+def confirm_payment(request, form, payment, paying=None):
     """A payment between members: first shows which debts it settles and what's left over, with a
     tick box per debt to choose what it's for; saves only when Confirm is clicked."""
     # On the screen itself the ticks decide (none ticked is a valid choice); arriving from the form,
-    # the debts are picked automatically.
-    chosen = None
+    # it's the debt being marked paid, or the debts are picked automatically.
+    chosen = {paying.pk} if paying else None
     if "choosing" in request.POST:
         chosen = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
     plan = None
@@ -85,7 +108,7 @@ def confirm_payment(request, form, payment):
             messages.warning(request, "What this payment covers has changed – please check it again.")
         else:
             messages.success(request, f"Added: {payment}")
-            return redirect(request.get_full_path())
+            return redirect("planned" if paying else request.get_full_path())
     plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
     return render(request, "sheetapp/confirm_payment.html", {"form": form, "payment": payment, "plan": plan})
 
