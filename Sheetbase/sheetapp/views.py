@@ -15,11 +15,23 @@ from .splits import AlreadyAdded, save_split
 from .summary import all_time_summary, year_summary
 
 
+def corrections():
+    return Prefetch("corrections", queryset=TransactionCorrection.objects.select_related(
+        "payer", "recipient", "created_by"))
+
+
+def with_source(debts):
+    """Debts with the purchase each came from (if any), as it is now, prefetched."""
+    return debts.select_related("source").prefetch_related(
+        Prefetch("source__corrections", queryset=TransactionCorrection.objects.all()))
+
+
 def transactions_with_history():
-    """Done transactions with their current values annotated and every version prefetched."""
+    """Done transactions with their current values annotated, every version prefetched, and the debts
+    each payment paid."""
     return Transaction.objects.with_current().select_related("payer", "recipient", "created_by").prefetch_related(
-        Prefetch("corrections", queryset=TransactionCorrection.objects.select_related(
-            "payer", "recipient", "created_by")))
+        corrections(),
+        Prefetch("settled_debts", queryset=with_source(PlannedTransaction.objects.order_by("created_at", "pk"))))
 
 
 def home(request):
@@ -196,7 +208,7 @@ def planned(request):
         debt.save()
         messages.success(request, f"Added: {debt}")
         return redirect("planned")
-    debts = PlannedTransaction.objects.open().select_related("debtor", "creditor", "created_by")
+    debts = with_source(PlannedTransaction.objects.open().select_related("debtor", "creditor", "created_by"))
     return render(request, "sheetapp/planned.html", {
         "form": form,
         "debts": debts,

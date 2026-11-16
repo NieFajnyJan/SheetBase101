@@ -22,6 +22,7 @@ class Leftover:
     amount: Decimal
     description: str
     tag: str = ""
+    source_id: int | None = None  # the rest of a share keeps the purchase it came from
 
 
 @dataclass
@@ -96,7 +97,8 @@ def plan_payment(payer, recipient, amount, description, chosen=None, lock=False)
         if debt.amount > remaining:
             # Underpaid: this debt is settled anyway and the payer still owes the rest.
             plan.leftover = Leftover(debtor=payer, creditor=recipient, amount=debt.amount - remaining,
-                                     description=_clip(f"{debt.description} – rest"), tag=debt.tag)
+                                     description=_clip(f"{debt.description} – rest"), tag=debt.tag,
+                                     source_id=debt.source_id)
             return plan
         remaining -= debt.amount
     if remaining > 0:
@@ -128,7 +130,7 @@ def record_payment(payment: Transaction, chosen=None, expected_signature=None) -
         if left := plan.leftover:
             PlannedTransaction.objects.create(
                 debtor=left.debtor, creditor=left.creditor, amount=left.amount, description=left.description,
-                tag=left.tag, created_by=payment.created_by, created_by_payment=payment)
+                tag=left.tag, source_id=left.source_id, created_by=payment.created_by, created_by_payment=payment)
     return plan
 
 

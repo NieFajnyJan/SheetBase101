@@ -25,6 +25,9 @@
   tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
   .tag { border-radius: 10px; padding: .05rem .5rem; font-size: .8rem; background: #e8ecf5; color: #2b3a55; }
   td.actions a { margin-right: .6rem; }
+  /* A debt from a purchase links to it: same colour as the text, a faint underline that darkens on hover. */
+  a.src { color: inherit; text-decoration: underline; text-decoration-color: #d4d7de; text-underline-offset: 2px; }
+  a.src:hover { color: #2b3a55; text-decoration-color: currentColor; }
 </style>
 {% endblock %}
 
@@ -51,7 +54,7 @@
           {% for d in debts %}
             <tr>
               <td>{{ d.debtor }}</td><td>{{ d.creditor }}</td>
-              <td class="desc">{{ d.description }}{% if d.tag %} <span class="tag">{{ d.tag }}</span>{% endif %}</td>
+              <td class="desc">{% if d.source %}{% with p=d.source.current %}<a class="src" href="{% url 'transactions' %}#t-{{ d.source_id }}" title="From the purchase: {{ p.description }}, {{ p.amount|zl }}">{{ d.description }}</a>{% endwith %}{% else %}{{ d.description }}{% endif %}{% if d.tag %} <span class="tag">{{ d.tag }}</span>{% endif %}</td>
               <td class="num">{{ d.amount|zl }}</td><td>{{ d.created_at|date:"d/m/y" }}</td>
               <td class="actions">
                 {% if d.debtor_id == user.pk or d.creditor_id == user.pk %}<a href="{% url 'transactions' %}?pay={{ d.pk }}">Mark paid</a>{% endif %}
