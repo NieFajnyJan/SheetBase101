@@ -37,6 +37,13 @@
   tr.has-history { cursor: pointer; }
   tr.cancelled td.val { text-decoration: line-through; color: #888; }
   td.actions a { margin-right: .6rem; }
+  /* What a payment paid; a debt from a purchase links to it, and the linked row lights up. */
+  .paid-for { color: #777; font-size: .85rem; }
+  /* Links to a purchase: the grey of the line around them, a faint underline that darkens on hover. */
+  .paid-for a { color: inherit; text-decoration: underline; text-decoration-color: #d4d7de; text-underline-offset: 2px; }
+  .paid-for a:hover { color: #2b3a55; text-decoration-color: currentColor; }
+  tr:target > td { background: #fff4cc; }
+  tr[id] { scroll-margin-top: 4rem; }
   tr.history > td { background: #f8f9fc; white-space: normal; }
   .history ol { list-style: none; margin: 0; padding: 0; }
   .history li { padding: .4rem 0; border-bottom: 1px dashed #dde; }
@@ -93,12 +100,17 @@
         <tbody>
           {% for t in transactions %}
             {% with c=t.current %}
-            <tr class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
+            <tr id="t-{{ t.pk }}" class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
                 {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
               <td class="val">{{ c.date|date:"d/m/y" }}</td><td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
               <td class="desc"><span class="val">{{ c.description }}</span>
                 {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}">Cancelled</button>
                 {% elif t.is_corrected %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}">corrected ×{{ t.corrections.all|length }}</button>{% endif %}
+                {% if t.paid_for %}
+                  <div class="paid-for">Paid for:
+                    {% for d in t.paid_for %}{% if d.source %}<a href="{% url 'transactions' %}#t-{{ d.source_id }}">{{ d.description }}</a>{% else %}{{ d.description }}{% endif %} {{ d.amount|zl }}{% if not forloop.last %}; {% endif %}{% endfor %}
+                  </div>
+                {% endif %}
               </td>
               <td class="num val">{{ c.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|date:"d/m/y" }}</td>
               <td class="actions">{% if t|correctable_by:user %}<a href="{% url 'correct_transaction' t.pk %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}">Cancel</a>{% endif %}</td>

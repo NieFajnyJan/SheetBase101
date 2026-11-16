@@ -1938,3 +1938,74 @@ class SplitTests(TestCase):
         self.assertContains(response, "split between people")
         self.client.post(url, {**fields, "description": "Fotele biurowe"})  # the description still can be
         self.assertEqual(Transaction.objects.get().current.description, "Fotele biurowe")
+
+
+# --------------------------------------------------------------------------- Debts linked to their purchase
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
+
+class PurchaseLinkTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.client.force_login(self.jan)
+        self.client.post(reverse("transactions"), {
+            "amount": "4606,16", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "3 fotele",
+            "date": today().strftime("%d/%m/%y"), "split": "on", "split_seed": str(uuid.uuid4()),
+            "split_amount": "20.00", "participants": [self.jan.pk, self.ola.pk], "confirm": ""})
+        self.purchase = Transaction.objects.get()
+        self.share = PlannedTransaction.objects.get()  # Ola owes Jan 10,00
+
+    def pay(self, amount, description="Oddaję"):
+        payment = Transaction(amount=Decimal(amount), payer=self.ola, recipient=self.jan, description=description,
+                              created_by=self.ola)
+        record_payment(payment, chosen={self.share.pk})
+        return payment
+
+    def test_planned_list_shows_the_purchase(self):
+        page = self.client.get(reverse("planned"))
+        # The description itself links to the purchase; hovering shows the purchase's full amount.
+        self.assertContains(page, f'<a class="src" href="{reverse("transactions")}#t-{self.purchase.pk}" '
+                                  f'title="From the purchase: 3 fotele, 4{NBSP}606,16{NBSP}zł">3 fotele</a>')
+        self.assertContains(self.client.get(reverse("transactions")), f'id="t-{self.purchase.pk}"')
+
+    def test_shows_the_purchase_as_corrected(self):
+        TransactionCorrection.objects.create(
+            original=self.purchase, amount=self.purchase.amount, payer=self.jan, recipient=self.shop,
+            description="Trzy fotele", date=self.purchase.date, reason="literówka", created_by=self.jan)
+        self.assertContains(self.client.get(reverse("planned")), 'title="From the purchase: Trzy fotele')
+
+    def test_hand_added_debt_has_no_link(self):
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                          description="Kawa", created_by=self.jan)
+        self.assertContains(self.client.get(reverse("planned")), 'class="src"', count=1)
+
+    def test_repayment_says_what_it_paid_for(self):
+        self.pay("10.00")
+        page = self.client.get(reverse("transactions"))
+        self.assertContains(page, "Paid for:")
+        self.assertContains(page, f'<a href="{reverse("transactions")}#t-{self.purchase.pk}">3 fotele</a> 10,00{NBSP}zł')
+
+    def test_paid_for_left_out_when_it_only_repeats_the_payment(self):
+        self.pay("10.00", description="3 fotele")  # as Mark paid fills it in
+        self.assertNotContains(self.client.get(reverse("transactions")), "Paid for:")
+
+    def test_rest_of_a_share_keeps_the_link(self):
+        self.pay("4.00")
+        rest = PlannedTransaction.objects.open().get()
+        self.assertEqual((rest.description, rest.amount, rest.source), ("3 fotele – rest", Decimal("6.00"), self.purchase))
+
+    def test_history_queries_dont_grow_with_payments(self):
+        self.pay("10.00")
+        self.client.get(reverse("transactions"))  # warm up (sessions, shop list...)
+        with CaptureQueriesContext(connection) as one:
+            self.client.get(reverse("transactions"))
+        for i in range(3):
+            self.share = PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("1.00"),
+                                                           description=f"Kawa {i}", source=self.purchase,
+                                                           created_by=self.jan)
+            self.pay("1.00")
+        with CaptureQueriesContext(connection) as many:
+            self.client.get(reverse("transactions"))
+        self.assertEqual(len(one), len(many))

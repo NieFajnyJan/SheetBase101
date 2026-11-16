@@ -159,6 +159,15 @@ class Transaction(models.Model):
         """A payment between members that paid no debts: all of it became a debt the other way."""
         return not self.settled_debts.exists() and self.leftovers.exists()
 
+    def paid_for(self):
+        """The debts this payment paid, when listing them tells you something: it paid several, or one
+        that differs from the payment itself. Prefetch "settled_debts" when listing many transactions."""
+        debts = list(self.settled_debts.all())
+        current = self.current
+        if len(debts) == 1 and (debts[0].description, debts[0].amount) == (current.description, current.amount):
+            return []
+        return debts
+
     def can_be_corrected_by(self, user):
         """Only whoever added the transaction can correct or cancel it, and not once it's cancelled."""
         return user.pk == self.created_by_id and not self.is_cancelled
