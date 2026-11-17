@@ -1632,6 +1632,17 @@ class MarkPaidTests(TestCase):
                          (self.ola.pk, self.jan.pk, Decimal("890.00"), "Tort", today()))
         self.assertContains(page, "Marking as paid")
 
+    def test_confirm_with_nothing_ticked_is_refused(self):
+        d = self.debt()
+        self.client.force_login(self.ola)
+        screen = self.client.post(self.pay_url(d), self.data(d, choosing="1"))  # the debt unticked
+        response = self.client.post(self.pay_url(d), self.data(d, confirm="", choosing="1",
+                                                               plan=screen.context["plan"].signature()))
+        self.assertTemplateUsed(response, "sheetapp/confirm_payment.html")
+        self.assertContains(response, "Tick the debt this payment is for")
+        self.assertFalse(Transaction.objects.exists())
+        self.assertEqual(list(PlannedTransaction.objects.all()), [d])  # no loan the other way
+
     def test_marks_that_debt_paid_and_returns_to_planned(self):
         # Another debt of the same amount is older, but the one clicked is the one that gets paid.
         older = self.debt(description="Inny tort")

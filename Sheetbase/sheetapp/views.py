@@ -100,7 +100,11 @@ def confirm_payment(request, form, payment, paying=None):
     if "choosing" in request.POST:
         chosen = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
     plan = None
-    if "confirm" in request.POST:
+    if "confirm" in request.POST and paying and not chosen:
+        # Marking a debt paid while paying for nothing would lend the money the other way instead.
+        messages.error(request, "Tick the debt this payment is for. To lend money instead, "
+                                "add the payment on the Transactions page.")
+    elif "confirm" in request.POST:
         try:
             record_payment(payment, chosen=chosen, expected_signature=request.POST.get("plan", ""))
         except PlanChanged as changed:
