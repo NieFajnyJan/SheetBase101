@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% load money %}
+
+{% block title %}Confirm split · SheetBase{% endblock %}
+
+{% block extra_head %}
+<style>
+  .shares { list-style: none; padding: 0; margin: .5rem 0 1rem; }
+  .shares li { display: flex; gap: .6rem; align-items: baseline; padding: .4rem 0; border-bottom: 1px dashed #dde; }
+  .shares .who { flex: 1; }
+  .shares .own { color: #777; }
+  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sum { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; }
+  .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
+  .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
+</style>
+{% endblock %}
+
+{% block content %}
+  <form class="card" method="post">
+    {% csrf_token %}
+    {% for field in form %}{% if field.name != "split_seed" %}{{ field.as_hidden }}{% endif %}{% endfor %}
+    <input type="hidden" name="split_seed" value="{{ plan.seed }}">
+
+    <h2>Confirm split</h2>
+    {% if purchase %}
+      <p><strong>{{ purchase.payer }} → {{ purchase.recipient }} · {{ purchase.description }} · {{ purchase.amount|zl }}</strong></p>
+    {% else %}
+      <p><strong>{{ plan.description }}</strong>{% if plan.tag %} <span class="muted">({{ plan.tag }})</span>{% endif %}</p>
+    {% endif %}
+
+    <p>{{ plan.amount|zl }} ÷ {{ plan.shares|length }} {{ plan.shares|length|pluralize:"person,people" }} =
+      <strong>{% if plan.lowest == plan.highest %}{{ plan.lowest|zl }}{% else %}{{ plan.lowest|zl }}–{{ plan.highest|zl }}{% endif %} each</strong></p>
+    {% if plan.lowest != plan.highest %}
+      <p class="muted">It doesn't divide evenly, so the leftover grosze go to people drawn by lot.</p>
+    {% endif %}
+
+    <ul class="shares">
+      {% for share in plan.shares %}
+        <li>
+          {% if share.member == plan.creditor %}
+            <span class="who own">{{ share.member }}’s own share – no planned transaction</span>
+          {% else %}
+            <span class="who">{{ share.member }} owes {{ plan.creditor }}</span>
+          {% endif %}
+          <span class="num">{{ share.amount|zl }}</span>
+        </li>
+      {% endfor %}
+    </ul>
+
+    <p class="sum">Adds {{ plan.owed|length }} planned transaction{{ plan.owed|length|pluralize }}:
+      <strong>{{ plan.owed_total|zl }}</strong> owed to {{ plan.creditor }}.</p>
+
+    <p class="muted">Nothing is saved until you click Confirm.</p>
+    <div class="actions">
+      <button class="btn" name="confirm">Confirm</button>
+      <button class="btn btn-secondary" name="back">Back</button>
+    </div>
+  </form>
+{% endblock %}

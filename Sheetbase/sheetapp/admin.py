@@ -122,7 +122,7 @@ class PlannedTransactionAdmin(admin.ModelAdmin):
     search_fields = ("description", "tag")
     actions = ["mark_selected_paid", "group_selected", "ungroup_selected"]
     date_hierarchy = "created_at"
-    readonly_fields = ("created_by", "created_at", "settled_by", "settled_at", "created_by_payment")
+    readonly_fields = ("created_by", "created_at", "settled_by", "settled_at", "created_by_payment", "source")
 
     @admin.display(description="group", ordering="group")
     def group_id_short(self, obj):

@@ -34,7 +34,7 @@
       {% csrf_token %}
       <h2>Add planned transaction</h2>
       <p class="muted">A debt: someone owes someone money. Nothing has been paid yet.</p>
-      {{ form.as_p }}
+      {% include "sheetapp/_add_form_fields.html" %}
       <button class="btn">Add</button>
     </form>
     <div class="side">

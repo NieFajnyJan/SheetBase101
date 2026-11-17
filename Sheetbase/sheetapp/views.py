@@ -7,10 +7,11 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from .forms import (DATE_FORMATS, CancelForm, CorrectionForm, HistoryFilterForm, PlannedTransactionForm, ShopForm,
-                    TransactionForm)
+from .forms import (DATE_FORMATS, AddPlannedForm, AddTransactionForm, CancelForm, CorrectionForm, HistoryFilterForm,
+                    PlannedTransactionForm, ShopForm)
 from .models import PlannedTransaction, Transaction, TransactionCorrection, needs_matching
 from .payments import PlanChanged, plan_payment, record_payment
+from .splits import AlreadyAdded, save_split
 from .summary import all_time_summary, year_summary
 
 
@@ -45,14 +46,14 @@ def transactions(request):
         details = {"payer": paying.debtor.pk, "recipient": paying.creditor.pk, "amount": str(paying.amount),
                    "description": paying.description, "date": timezone.localdate().strftime(DATE_FORMATS[0])}
         if request.method == "GET":  # straight to the confirmation screen; its Back opens the form
-            form = TransactionForm(details)
+            form = AddTransactionForm(details)
             if form.is_valid():
                 payment = form.save(commit=False)
                 payment.created_by = request.user
                 return confirm_payment(request, form, payment, paying)
-        form = TransactionForm(initial=details)
+        form = AddTransactionForm(initial=details)
     else:
-        form = TransactionForm(initial={"payer": request.user})
+        form = AddTransactionForm(initial={"payer": request.user})
     shop_form = ShopForm()
 
     if request.method == "POST" and "add_shop" in request.POST:
@@ -61,10 +62,12 @@ def transactions(request):
             messages.success(request, f"Added shop: {shop_form.save()}")
             return redirect(request.get_full_path())  # keeps the current filters
     elif request.method == "POST":
-        form = TransactionForm(request.POST)
+        form = AddTransactionForm(request.POST)
         if form.is_valid() and "back" not in request.POST:  # Back: the form again, still filled in
             obj = form.save(commit=False)
             obj.created_by = request.user
+            if form.cleaned_data["split"]:
+                return confirm_split(request, form, purchase=obj)
             if not needs_matching(obj.payer, obj.recipient):  # a purchase or return: no debts involved
                 obj.save()
                 messages.success(request, f"Added: {obj}")
@@ -126,6 +129,23 @@ def confirm_payment(request, form, payment, paying=None):
                   {"form": form, "payment": payment, "plan": plan, "paying": paying})
 
 
+def confirm_split(request, form, purchase=None):
+    """Splitting: first shows each person's share; saves the purchase (if any) and the shares only
+    when Confirm is clicked."""
+    plan = form.split_plan()
+    if "confirm" in request.POST:
+        try:
+            shares = save_split(plan, request.user, purchase)
+        except AlreadyAdded:  # e.g. Confirm clicked twice
+            messages.info(request, "This split was already added.")
+        else:
+            added = f"{purchase} and " if purchase else ""
+            messages.success(request, f"Added: {added}{len(shares)} planned transaction{'s' if len(shares) != 1 else ''}"
+                                      f" owed to {plan.creditor}.")
+        return redirect(request.get_full_path())
+    return render(request, "sheetapp/confirm_split.html", {"form": form, "plan": plan, "purchase": purchase})
+
+
 def own_transaction(request, pk):
     """The transaction, if the logged-in user may correct it; otherwise 403."""
     transaction = get_object_or_404(transactions_with_history(), pk=pk)
@@ -166,9 +186,11 @@ def cancel_transaction(request, pk):
 
 @login_required
 def planned(request):
-    """Add a planned transaction (a debt) and see all open ones with their total."""
-    form = PlannedTransactionForm(request.POST or None, initial={"creditor": request.user})
-    if request.method == "POST" and form.is_valid():
+    """Add a planned transaction (a debt), or split one between people, and see all open ones with their total."""
+    form = AddPlannedForm(request.POST or None, initial={"creditor": request.user})
+    if request.method == "POST" and form.is_valid() and "back" not in request.POST:
+        if form.cleaned_data["split"]:
+            return confirm_split(request, form)
         debt = form.save(commit=False)
         debt.created_by = request.user
         debt.save()
