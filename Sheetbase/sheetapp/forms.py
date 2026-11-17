@@ -1,8 +1,11 @@
+import uuid
+
 from django import forms
 from django.utils import timezone
 from django.utils.text import slugify
 
 from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, PlannedTransaction, Transaction, TransactionCorrection, User
+from .splits import GROSZ, plan_split
 
 # dd/mm/yy everywhere. A text box (the browser's own date picker can't change its format);
 # the "datepicker" class turns it into a calendar on the page. 4-digit years are accepted too.
@@ -76,6 +79,112 @@ class PlannedTransactionForm(forms.ModelForm):
         fields = ["debtor", "creditor", "amount", "description", "tag"]
         field_classes = {"amount": AmountField}
         widgets = {"amount": forms.TextInput(attrs={"inputmode": "decimal"})}
+
+
+SPLIT_FIELDS = ["split", "participants", "split_amount", "split_seed"]
+
+
+class SplitMixin:
+    """Adds splitting to an add form: a tick box, the members taking part (all ticked to start with)
+    and a hidden seed that decides who gets leftover grosze. The form's own fields come first."""
+
+    def add_split_fields(self, split_amount=False):
+        self.fields["split"] = forms.BooleanField(required=False, label="Split between people")
+        members = User.objects.filter(is_shop=False, is_active=True)
+        self.fields["participants"] = forms.ModelMultipleChoiceField(
+            members, required=False, widget=forms.CheckboxSelectMultiple, label="Who chips in",
+            initial=lambda: list(members.values_list("pk", flat=True)))
+        if split_amount:
+            self.fields["split_amount"] = AmountField(
+                label="Amount to split", required=False, max_digits=10, decimal_places=2,
+                min_value=GROSZ, widget=forms.TextInput(attrs={"inputmode": "decimal"}),
+                help_text="Leave empty to split the whole amount.")
+            # Shown on the “?” next to the label.
+            self.fields["split_amount"].hint = (
+                "Only part of the purchase is shared? Say you bought 3 chairs for 4606,16 zł, but only one "
+                "of them is for everyone: enter 1535,39 (one chair) here. The purchase is still recorded as "
+                "4606,16 zł, and only 1535,39 zł is split between the people ticked.")
+        self.fields["split_seed"] = forms.UUIDField(widget=forms.HiddenInput, initial=uuid.uuid4, required=False)
+
+    def main_fields(self):
+        return [f for f in self.visible_fields() if f.name not in SPLIT_FIELDS]
+
+    def drop_split_errors(self):
+        """Without “Split between people” ticked its fields are ignored: what was typed there before
+        unticking it (e.g. 0 to split) mustn't block the form from behind the hidden section."""
+        for name in SPLIT_FIELDS:
+            self._errors.pop(name, None)
+
+    def check_split(self, data, creditor, amount, amount_field):
+        """Checks a split of `amount` owed to `creditor` between the ticked people."""
+        people = list(data.get("participants") or [])
+        if creditor and not any(p != creditor for p in people):
+            self.add_error("participants", f"Tick at least one person besides {creditor}.")
+        elif amount and people and amount < GROSZ * len(people):
+            self.add_error(amount_field, f"Too little to split between {len(people)} people.")
+
+    def split_plan(self):
+        data = self.cleaned_data
+        return plan_split(self.split_creditor(), self.split_total(), data["participants"], data["description"],
+                          data.get("split_seed") or uuid.uuid4(), tag=data.get("tag", ""))
+
+
+class AddTransactionForm(SplitMixin, TransactionForm):
+    """The add form on the Transactions page. Splitting a purchase: the shares become
+    planned transactions owed to whoever paid."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.add_split_fields(split_amount=True)
+
+    def split_creditor(self):
+        return self.cleaned_data["payer"]
+
+    def split_total(self):
+        return self.cleaned_data.get("split_amount") or self.cleaned_data["amount"]
+
+    def clean(self):
+        data = super().clean()
+        if not data.get("split"):
+            self.drop_split_errors()
+            return data
+        payer, recipient, amount = data.get("payer"), data.get("recipient"), data.get("amount")
+        if payer and recipient and (payer.is_shop or not recipient.is_shop):
+            self.add_error("split", "Splitting is for purchases: “paid by” a member, “paid to” a shop.")
+            return data
+        part = data.get("split_amount")
+        if part and amount and part > amount:
+            self.add_error("split_amount", "Can't split more than the amount paid.")
+        else:
+            self.check_split(data, payer, part or amount, "split_amount" if part else "amount")
+        return data
+
+
+class AddPlannedForm(SplitMixin, PlannedTransactionForm):
+    """The add form on the Planned page. When splitting, “owes” is replaced by the people who chip in:
+    each gets a planned transaction for their share, owed to “owed to”."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["debtor"].required = False  # checked in clean(): only needed when not splitting
+        self.add_split_fields()
+
+    def split_creditor(self):
+        return self.cleaned_data["creditor"]
+
+    def split_total(self):
+        return self.cleaned_data["amount"]
+
+    def clean(self):
+        data = super().clean()
+        if data.get("split"):
+            data["debtor"] = None  # replaced by the people who chip in
+            self.check_split(data, data.get("creditor"), data.get("amount"), "amount")
+        else:
+            self.drop_split_errors()
+            if not data.get("debtor") and "debtor" not in self.errors:
+                self.add_error("debtor", forms.Field.default_error_messages["required"])
+        return data
 
 
 MONTHS = [(m, timezone.datetime(2000, m, 1).strftime("%B")) for m in range(1, 13)]

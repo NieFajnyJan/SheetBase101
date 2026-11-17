@@ -218,10 +218,15 @@ class TransactionCorrection(models.Model):
             raise ValidationError("This transaction is cancelled and can't be corrected any more.")
         if self.cancelled:
             from .payments import check_can_undo
+            from .splits import check_can_cancel_shares
 
             check_can_undo(self.original)
+            check_can_cancel_shares(self.original)
         elif self.payer_id and self.recipient_id:
             current = self.original.current
+            if self.changes_money() and self.original.split_shares.exists():
+                raise ValidationError("This purchase was split between people, so its amount, “paid by” and "
+                                      "“paid to” can't be changed. Cancel it and add it again instead.")
             if self.original.is_loan():
                 # Paid no debts, so the loan can simply follow the correction – unless it's been paid back.
                 if self.changes_money():
@@ -252,8 +257,10 @@ class TransactionCorrection(models.Model):
             super().save(*args, **kwargs)
             if self.cancelled:
                 from .payments import undo_payment
+                from .splits import cancel_shares
 
                 undo_payment(self.original)
+                cancel_shares(self.original)
             elif correcting_loan:
                 from .payments import correct_loan
 
@@ -329,6 +336,11 @@ class PlannedTransaction(models.Model):
     created_by_payment = models.ForeignKey(
         Transaction, on_delete=models.PROTECT, null=True, blank=True, editable=False,
         related_name="leftovers", verbose_name="leftover of payment",
+    )
+    # Set on a share of a purchase split between people, so cancelling the purchase cancels its shares.
+    source = models.ForeignKey(
+        Transaction, on_delete=models.PROTECT, null=True, blank=True, editable=False,
+        related_name="split_shares", verbose_name="share of purchase",
     )
 
     objects = PlannedTransactionQuerySet.as_manager()
