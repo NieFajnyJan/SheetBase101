@@ -7,7 +7,7 @@ from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, PlannedTransaction, Tran
 # dd/mm/yy everywhere. A text box (the browser's own date picker can't change its format);
 # the "datepicker" class turns it into a calendar on the page. 4-digit years are accepted too.
 DATE_FORMATS = ["%d/%m/%y", "%d/%m/%Y"]
-DATE_WIDGET = forms.DateInput(format="%d/%m/%y",
+DATE_WIDGET = forms.DateInput(format=DATE_FORMATS[0],
                               attrs={"class": "datepicker", "placeholder": "dd/mm/yy", "autocomplete": "off"})
 
 

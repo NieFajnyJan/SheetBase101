@@ -62,7 +62,12 @@
     <p class="muted">Nothing is saved until you click Confirm.</p>
     <div class="actions">
       <button class="btn" name="confirm">Confirm</button>
-      <button class="btn btn-secondary" name="back">Back</button>
+      {% if paying %}
+        <button class="btn btn-secondary" name="back">Change details</button>
+        <a class="btn btn-secondary" href="{% url 'planned' %}">Cancel</a>
+      {% else %}
+        <button class="btn btn-secondary" name="back">Back</button>
+      {% endif %}
       {% if plan.debts %}<button class="btn btn-secondary" name="recalculate" id="recalculate">Update</button>{% endif %}
     </div>
   </form>

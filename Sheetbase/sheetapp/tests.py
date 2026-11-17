@@ -1622,15 +1622,36 @@ class MarkPaidTests(TestCase):
             page = self.client.get(reverse("planned"))
             (self.assertContains if shown else self.assertNotContains)(page, self.pay_url(d))
 
-    def test_form_filled_in_from_the_debt(self):
+    def test_opens_straight_on_the_confirmation_screen(self):
+        older = self.debt(description="Inny tort")
         d = self.debt()
         self.client.force_login(self.ola)
-        page = self.client.get(self.pay_url(d))
+        screen = self.client.get(self.pay_url(d))
+        self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+        payment = screen.context["payment"]
+        self.assertEqual((payment.payer, payment.recipient, payment.amount, payment.description, payment.date),
+                         (self.ola, self.jan, Decimal("890.00"), "Tort", today()))
+        self.assertEqual([(r.pk, ticked) for r, ticked, _ in screen.context["plan"].rows()],
+                         [(older.pk, False), (d.pk, True)])  # only the debt clicked
+        self.assertFalse(Transaction.objects.exists())  # nothing saved yet
+        # Confirm from there records it.
+        response = self.client.post(self.pay_url(d), self.data(d, confirm="", choosing="1", debts=[d.pk],
+                                                               plan=screen.context["plan"].signature()))
+        self.assertRedirects(response, reverse("planned"))
+        d.refresh_from_db()
+        self.assertEqual(d.settled_by, Transaction.objects.get())
+
+    def test_change_details_opens_the_filled_in_form(self):
+        d = self.debt()
+        self.client.force_login(self.ola)
+        self.assertContains(self.client.get(self.pay_url(d)), "Change details")
+        page = self.client.post(self.pay_url(d), self.data(d, back="", choosing="1", debts=[d.pk]))
+        self.assertTemplateUsed(page, "sheetapp/transactions.html")
         form = page.context["form"]
         self.assertEqual((form["payer"].value(), form["recipient"].value(), form["amount"].value(),
-                          form["description"].value(), form["date"].value()),
-                         (self.ola.pk, self.jan.pk, Decimal("890.00"), "Tort", today()))
+                          form["description"].value()), (str(self.ola.pk), str(self.jan.pk), "890.00", "Tort"))
         self.assertContains(page, "Marking as paid")
+        self.assertFalse(Transaction.objects.exists())
 
     def test_confirm_with_nothing_ticked_is_refused(self):
         d = self.debt()
