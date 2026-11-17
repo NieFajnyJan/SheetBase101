@@ -1549,17 +1549,17 @@ class PlannedPageTests(TestCase):
         self.assertRedirects(self.client.post(self.delete_url(d)), self.url)
         self.assertFalse(PlannedTransaction.objects.exists())
 
-    def test_only_creditor_can_edit_or_delete(self):
-        d = self.debt()  # ola owes jan
+    def test_any_member_can_edit_or_delete(self):
         for who in (self.ola, self.ewa):  # the debtor and a bystander
+            d = self.debt()  # ola owes jan
             self.client.force_login(who)
-            self.assertNotContains(self.client.get(self.url), self.edit_url(d))
-            self.assertEqual(self.client.get(self.edit_url(d)).status_code, 403)
-            self.assertEqual(self.client.post(self.edit_url(d), {"debtor": self.ola.pk, "creditor": self.jan.pk,
-                                                                 "amount": "1", "description": "x"}).status_code, 403)
-            self.assertEqual(self.client.post(self.delete_url(d)).status_code, 403)
-        d.refresh_from_db()
-        self.assertEqual(d.amount, Decimal("10.00"))
+            self.assertContains(self.client.get(self.url), self.edit_url(d))
+            self.client.post(self.edit_url(d), {"debtor": self.ola.pk, "creditor": self.jan.pk,
+                                                "amount": "1", "description": "x"})
+            d.refresh_from_db()
+            self.assertEqual(d.amount, Decimal("1.00"))
+            self.client.post(self.delete_url(d))
+            self.assertFalse(PlannedTransaction.objects.filter(pk=d.pk).exists())
 
     def test_settled_cant_be_edited_or_deleted(self):
         pay = Transaction.objects.create(amount=Decimal("10.00"), payer=self.ola, recipient=self.jan,
@@ -1576,18 +1576,20 @@ class PlannedPageTests(TestCase):
         self.client.post(self.delete_url(a))
         self.assertEqual(list(PlannedTransaction.objects.all()), [alone])
 
-    def test_group_delete_refused_when_paid_or_owed_to_someone_else(self):
+    def test_group_delete_refused_when_someone_paid(self):
         pay = Transaction.objects.create(amount=Decimal("10.00"), payer=self.ewa, recipient=self.jan,
                                          created_by=self.jan, description="Zwrot")
         a = self.debt()
         paid = self.debt(debtor=self.ewa, settled_by=pay, settled_at=timezone.now())
         PlannedTransaction.objects.filter(pk__in=[a.pk, paid.pk]).make_group()
         self.assertContains(self.client.post(self.delete_url(a)), "ewa already paid")
+        self.assertEqual(PlannedTransaction.objects.count(), 2)
 
-        b, not_mine = self.debt(), self.debt(debtor=self.jan, creditor=self.ewa)
-        PlannedTransaction.objects.filter(pk__in=[b.pk, not_mine.pk]).make_group()
-        self.assertContains(self.client.post(self.delete_url(b)), "is owed to ewa, not you")
-        self.assertEqual(PlannedTransaction.objects.count(), 4)
+    def test_group_owed_to_different_people_can_be_deleted(self):
+        b, other = self.debt(), self.debt(debtor=self.jan, creditor=self.ewa)
+        PlannedTransaction.objects.filter(pk__in=[b.pk, other.pk]).make_group()
+        self.client.post(self.delete_url(b))
+        self.assertFalse(PlannedTransaction.objects.exists())
 
 
 # --------------------------------------------------------------------------- Mark paid

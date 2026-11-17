@@ -204,17 +204,17 @@ def planned(request):
     })
 
 
-def own_debt(request, pk):
-    """The planned transaction, if the logged-in user may edit or delete it; otherwise 403."""
+def open_debt(pk):
+    """The planned transaction, while it's open: any member may edit or delete it then. Once paid, 403."""
     debt = get_object_or_404(PlannedTransaction, pk=pk)
-    if not debt.can_be_changed_by(request.user):
-        raise PermissionDenied("Only the person who is owed the money can change a debt, and only while it's open.")
+    if debt.is_settled:
+        raise PermissionDenied("This debt has been paid, so it can't be changed any more.")
     return debt
 
 
 @login_required
 def edit_planned(request, pk):
-    debt = own_debt(request, pk)
+    debt = open_debt(pk)
     form = PlannedTransactionForm(request.POST or None, instance=debt)
     if request.method == "POST" and form.is_valid():
         messages.success(request, f"Saved: {form.save()}")
@@ -225,12 +225,11 @@ def edit_planned(request, pk):
 @login_required
 def delete_planned(request, pk):
     """Deleting is only for mistakes; it takes the whole group with it. Paying goes through a payment."""
-    debt = own_debt(request, pk)
+    debt = open_debt(pk)
     this = PlannedTransaction.objects.filter(pk=debt.pk)
     rows = list(this.with_groups().select_related("debtor", "creditor"))
-    # Refused when someone in the group already paid, or a row in it is owed to someone else.
+    # Refused when someone in the group already paid.
     problems = [f"{r.debtor} already paid “{r.description}”." for r in rows if r.is_settled]
-    problems += [f"“{r}” is owed to {r.creditor}, not you." for r in rows if r.creditor_id != request.user.pk]
     if request.method == "POST" and not problems:
         try:
             deleted = this.delete_with_groups()[0]
