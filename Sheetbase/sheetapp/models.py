@@ -377,11 +377,6 @@ class PlannedTransaction(models.Model):
         """Either side of a debt may record that it was paid – nobody else."""
         return user.pk in (self.debtor_id, self.creditor_id)
 
-    def can_be_changed_by(self, user):
-        """Only the creditor (the one owed the money) may edit or delete a debt – never the debtor –
-        and only while it's open."""
-        return user.pk == self.creditor_id and not self.is_settled
-
     # A settled debt is history: it can't be changed or deleted (only reopened when the payment that settled it is cancelled).
     def save(self, *args, **kwargs):
         if not self._state.adding and PlannedTransaction.objects.settled().filter(pk=self.pk).exists():
