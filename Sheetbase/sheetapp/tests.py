@@ -1490,8 +1490,8 @@ class PlannedPageTests(TestCase):
         self.assertContains(self.client.get(reverse("home")), f'href="{self.url}"')
 
     def test_switch_between_add_forms(self):
-        self.assertContains(self.client.get(self.url), "Add a done transaction")
-        self.assertContains(self.client.get(reverse("transactions")), "Add a planned transaction")
+        self.assertContains(self.client.get(self.url), "Done transactions →")
+        self.assertContains(self.client.get(reverse("transactions")), "Planned transactions →")
 
     def test_add(self):
         self.assertRedirects(self.add(), self.url)

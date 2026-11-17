@@ -60,7 +60,7 @@
     </form>
 
     <div class="side">
-      <a class="card switch" href="{% url 'planned' %}">Add a planned transaction →</a>
+      <a class="card switch" href="{% url 'planned' %}">Planned transactions →</a>
       {# Collapsed by default; stays open when the shop form has an error. #}
       <details class="card"{% if shop_form.errors %} open{% endif %}>
         <summary>+ Add shop</summary>
