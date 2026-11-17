@@ -218,3 +218,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# The audit log (its own database)
+audit.sqlite3
+audit.sqlite3-journal

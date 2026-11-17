@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'sheetapp',  # before allauth, so our templates override allauth's
+    'audit',
     'allauth',
     'allauth.account',
     'allauth.socialaccount',
@@ -70,6 +71,7 @@ MIDDLEWARE = [
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
     'allauth.account.middleware.AccountMiddleware',
+    'audit.log.RequestMiddleware',  # who made a change and from where
 ]
 
 AUTHENTICATION_BACKENDS = [
@@ -149,7 +151,32 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
-    }
+    },
+    # The audit log, kept apart from the data it records. Set it up with: manage.py migrate --database audit
+    # IMMEDIATE: each write takes the lock at once, so entries are chained one after another.
+    'audit': {
+        'ENGINE': 'django.db.backends.sqlite3',
+        'NAME': BASE_DIR / 'audit.sqlite3',
+        'OPTIONS': {'transaction_mode': 'IMMEDIATE'},
+    },
+}
+DATABASE_ROUTERS = ['audit.router.AuditRouter']
+
+# Every save and delete of these goes into the audit log, under the name the log shows them by.
+AUDIT_MODELS = {
+    'sheetapp.User': 'user',
+    'sheetapp.Transaction': 'done transaction',
+    'sheetapp.TransactionCorrection': 'correction',
+    'sheetapp.PlannedTransaction': 'planned transaction',
+}
+
+# Audit entries are also printed in the terminal the server runs in, as they're written.
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'audit': {'format': 'AUDIT {message}', 'style': '{'}},
+    'handlers': {'audit_console': {'class': 'logging.StreamHandler', 'formatter': 'audit'}},
+    'loggers': {'audit.entries': {'handlers': ['audit_console'], 'level': 'INFO', 'propagate': False}},
 }
 
 

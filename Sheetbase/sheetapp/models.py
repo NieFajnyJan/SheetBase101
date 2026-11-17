@@ -10,6 +10,8 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.functional import cached_property
 
+from audit.querysets import AuditedQuerySet
+
 # Shops are users with is_shop=True that can't log in; purchases are paid to them.
 # This one is created in migration 0003; more can be added on the Transactions page.
 SHOP_USERNAME = "shop"
@@ -59,7 +61,7 @@ CORRECTABLE_FIELDS = ["amount", "payer", "recipient", "description", "date"]
 MONEY_FIELDS = ["amount", "payer_id", "recipient_id"]
 
 
-class TransactionQuerySet(models.QuerySet):
+class TransactionQuerySet(AuditedQuerySet):
     def with_current(self):
         """Annotates each transaction with its *current* values (cur_amount, cur_payer, ...):
         those of its latest correction, or its own when it has none. cur_counted is what it adds
@@ -279,7 +281,7 @@ class TransactionCorrection(models.Model):
         raise ValueError("A correction can't be deleted.")
 
 
-class PlannedTransactionQuerySet(models.QuerySet):
+class PlannedTransactionQuerySet(AuditedQuerySet):
     def open(self):
         """Debts that still count. Use this everywhere debts are added up (balances, who owes whom)."""
         return self.filter(settled_by__isnull=True)
