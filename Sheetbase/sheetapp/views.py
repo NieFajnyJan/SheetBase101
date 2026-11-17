@@ -7,7 +7,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from .forms import CancelForm, CorrectionForm, HistoryFilterForm, PlannedTransactionForm, ShopForm, TransactionForm
+from .forms import (DATE_FORMATS, CancelForm, CorrectionForm, HistoryFilterForm, PlannedTransactionForm, ShopForm,
+                    TransactionForm)
 from .models import PlannedTransaction, Transaction, TransactionCorrection, needs_matching
 from .payments import PlanChanged, plan_payment, record_payment
 from .summary import all_time_summary, year_summary
@@ -40,9 +41,16 @@ def transactions(request):
     if paying and paying.is_settled:  # e.g. Confirm clicked twice: the first click already paid it
         messages.info(request, f"Already paid: {paying}")
         return redirect("planned")
-    if paying:  # Mark paid: the form filled in from the debt
-        form = TransactionForm(initial={"payer": paying.debtor, "recipient": paying.creditor,
-                                        "amount": paying.amount, "description": paying.description})
+    if paying:  # Mark paid: the payment filled in from the debt
+        details = {"payer": paying.debtor.pk, "recipient": paying.creditor.pk, "amount": str(paying.amount),
+                   "description": paying.description, "date": timezone.localdate().strftime(DATE_FORMATS[0])}
+        if request.method == "GET":  # straight to the confirmation screen; its Back opens the form
+            form = TransactionForm(details)
+            if form.is_valid():
+                payment = form.save(commit=False)
+                payment.created_by = request.user
+                return confirm_payment(request, form, payment, paying)
+        form = TransactionForm(initial=details)
     else:
         form = TransactionForm(initial={"payer": request.user})
     shop_form = ShopForm()
@@ -114,7 +122,8 @@ def confirm_payment(request, form, payment, paying=None):
             messages.success(request, f"Added: {payment}")
             return redirect("planned" if paying else request.get_full_path())
     plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
-    return render(request, "sheetapp/confirm_payment.html", {"form": form, "payment": payment, "plan": plan})
+    return render(request, "sheetapp/confirm_payment.html",
+                  {"form": form, "payment": payment, "plan": plan, "paying": paying})
 
 
 def own_transaction(request, pk):
