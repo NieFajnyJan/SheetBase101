@@ -10,8 +10,10 @@ class Entry(models.Model):
 
     CREATE, UPDATE, DELETE = "create", "update", "delete"
     LOGIN, LOGOUT, LOGIN_FAILED = "login", "logout", "login_failed"
+    SNAPSHOT = "snapshot"  # a record as it was when the log started, see the audit_snapshot command
     ACTIONS = [(CREATE, "added"), (UPDATE, "changed"), (DELETE, "deleted"),
-               (LOGIN, "logged in"), (LOGOUT, "logged out"), (LOGIN_FAILED, "failed to log in")]
+               (LOGIN, "logged in"), (LOGOUT, "logged out"), (LOGIN_FAILED, "failed to log in"),
+               (SNAPSHOT, "recorded")]
 
     at = models.DateTimeField(default=timezone.now)
     # Not a foreign key: users live in the other database, and a deleted user's entries must stay.

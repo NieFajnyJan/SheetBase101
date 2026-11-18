@@ -3,7 +3,7 @@ from decimal import Decimal
 from io import StringIO
 
 from django.contrib import admin
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 from django.db import DatabaseError, connections, transaction
 from django.test import TestCase
 from django.urls import reverse
@@ -12,6 +12,7 @@ from django.utils import timezone
 from sheetapp.forms import DATE_FORMATS
 from sheetapp.models import PlannedTransaction, Transaction, User
 
+from .check import chain_problems, data_problems
 from .log import entry_hash, hashed_fields
 from .models import Entry
 
@@ -263,3 +264,76 @@ class ReadableTests(AuditTestCase):
             self.jan.set_password("another-one-77")
             self.jan.save()
         self.assertIn("    password: changed", self.text(action=Entry.UPDATE))
+
+
+class ConsistencyTests(AuditTestCase):
+    """audit_check: the log is intact and agrees with the data."""
+
+    def setUp(self):
+        super().setUp()
+        self.snapshot()  # jan and ola were added before anything was logged
+        self.pizza = self.debt()
+
+    def snapshot(self):
+        out = StringIO()
+        with self.captureOnCommitCallbacks(execute=True):
+            call_command("audit_snapshot", stdout=out)
+        return out.getvalue()
+
+    def problems(self):
+        return chain_problems() + data_problems()
+
+    def sql(self, statement, *params, using="default"):
+        with connections[using].cursor() as cursor:
+            cursor.execute(statement, params)
+
+    def test_a_log_that_matches_the_data(self):
+        self.pay(self.pizza, by=self.ola)
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("delete_planned", args=[self.debt().pk]))
+        self.assertEqual(self.problems(), [])
+        out = StringIO()
+        call_command("audit_check", stdout=out)
+        self.assertIn("intact and agrees with the data", out.getvalue())
+
+    def test_a_change_made_outside_the_app(self):
+        self.sql("UPDATE sheetapp_plannedtransaction SET amount = '99.00' WHERE id = %s", self.pizza.pk)
+        self.assertEqual(self.problems(),
+                         [f"planned transaction {self.pizza.pk}: amount (zł) is 99,00, the log says 10,00"])
+        with self.assertRaisesMessage(CommandError, "1 problem found"):
+            call_command("audit_check", stdout=StringIO())
+
+    def test_a_password_changed_outside_the_app(self):
+        self.sql("UPDATE sheetapp_user SET password = 'x' WHERE id = %s", self.ola.pk)
+        self.assertEqual(self.problems(), [f"user {self.ola.pk}: password changed without the log knowing"])
+
+    def test_records_added_or_deleted_outside_the_app(self):
+        ghost, = User.objects.bulk_create([User(username="ghost")])  # bulk_create skips the save hooks
+        self.sql("DELETE FROM sheetapp_plannedtransaction WHERE id = %s", self.pizza.pk)
+        self.assertEqual(self.problems(), [f"user {ghost.pk}: not in the log",
+                                           f"planned transaction {self.pizza.pk}: deleted without the log knowing"])
+
+    def test_an_entry_changed_in_the_log(self):
+        entry = Entry.objects.last()
+        self.sql("DROP TRIGGER audit_entry_no_update", using="audit")
+        self.sql("UPDATE audit_entry SET username = 'ola' WHERE id = %s", entry.pk, using="audit")
+        self.assertEqual(self.problems(), [
+            "the database no longer refuses changes to entries (audit_entry_no_update removed)",
+            f"#{entry.pk}: changed after it was written"])
+
+    def test_an_entry_removed_from_the_log(self):
+        self.debt("20,00")
+        *_, removed, last = Entry.objects.all()
+        self.sql("DROP TRIGGER audit_entry_no_delete", using="audit")
+        self.sql("DELETE FROM audit_entry WHERE id = %s", removed.pk, using="audit")
+        self.assertIn(f"#{last.pk}: the entry before it was changed or removed", self.problems())
+
+    def test_snapshot_records_what_the_log_has_never_seen(self):
+        ghost, = User.objects.bulk_create([User(username="ghost")])
+        self.assertEqual(self.snapshot(), "Recorded 1 record.\n")
+        self.assertEqual(self.problems(), [])
+        self.assertEqual(self.snapshot(), "Recorded 0 records.\n")  # only once per record
+        entry = Entry.objects.last()
+        self.assertEqual((entry.action, entry.object_id), (Entry.SNAPSHOT, str(ghost.pk)))
+        self.assertIn(f"system: recorded user {ghost.pk}: ghost", entry.lines()[0])
+        self.assertIn("      username: ghost", entry.lines())
