@@ -69,7 +69,7 @@ def label(field, attname):
 
 
 def lines(entry):
-    """A headline, then what changed (or a deleted record's last values)."""
+    """A headline, then what changed (or a record's values, when it's deleted or recorded as it was)."""
     when = timezone.localtime(entry.at).strftime(f"{DATE} %H:%M:%S")
     where = f" ({entry.ip})" if entry.ip else ""
     who = entry.username or "system"
@@ -91,9 +91,10 @@ def lines(entry):
                 out.append("    password: changed")
             else:
                 out.append(f"    {label(field, name)}: {value(field, old)} → {value(field, new)}")
-    elif entry.action == entry.DELETE and entry.before:
-        out.append("    last values:")
-        for name, raw in entry.before.items():
+    elif entry.action in (entry.DELETE, entry.SNAPSHOT):
+        heading, values = ("last values", entry.before) if entry.action == entry.DELETE else ("values", entry.after)
+        out.append(f"    {heading}:")
+        for name, raw in (values or {}).items():
             if name not in HIDDEN and raw not in (None, ""):
                 field = fields.get(name)
                 out.append(f"      {label(field, name)}: {value(field, raw)}")
