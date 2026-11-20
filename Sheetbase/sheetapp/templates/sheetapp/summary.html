@@ -76,26 +76,6 @@
   {% for s in summaries %}
   <section class="period {% if forloop.first %}this-year{% else %}last-year{% endif %}">
     <h2>{{ s.year }}{% if forloop.first %} (this year){% else %} (last year){% endif %}</h2>
-    <h3>Shops in {{ s.year }}</h3>
-    {% if s.shop_rows %}
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Shop</th><th class="num">Bought from it</th><th class="num">Returned by it</th></tr></thead>
-          <tbody>
-            {% for r in s.shop_rows %}
-              <tr>
-                <td>{{ r.shop }}</td>
-                <td class="num{% if not r.sold %} zero{% endif %}">{{ r.sold|zl }}</td>
-                <td class="num{% if not r.returned %} zero{% endif %}">{{ r.returned|zl }}</td>
-              </tr>
-            {% endfor %}
-          </tbody>
-          <tfoot><tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td></tr></tfoot>
-        </table>
-      </div>
-    {% else %}
-      <p class="muted">No purchases from shops in {{ s.year }}.</p>
-    {% endif %}
     <h3>Members in {{ s.year }}</h3>
     <div class="table-wrap">
       <table>
@@ -120,6 +100,26 @@
         </tfoot>
       </table>
     </div>
+    <h3>Shops in {{ s.year }}</h3>
+    {% if s.shop_rows %}
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Shop</th><th class="num">Bought from it</th><th class="num">Returned by it</th></tr></thead>
+          <tbody>
+            {% for r in s.shop_rows %}
+              <tr>
+                <td>{{ r.shop }}</td>
+                <td class="num{% if not r.sold %} zero{% endif %}">{{ r.sold|zl }}</td>
+                <td class="num{% if not r.returned %} zero{% endif %}">{{ r.returned|zl }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+          <tfoot><tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td></tr></tfoot>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">No purchases from shops in {{ s.year }}.</p>
+    {% endif %}
     <p class="totals">
       Purchases in {{ s.year }}: <strong>{{ s.purchases|zl }}</strong> ·
       all transactions: <strong>{{ s.total|zl }}</strong>
