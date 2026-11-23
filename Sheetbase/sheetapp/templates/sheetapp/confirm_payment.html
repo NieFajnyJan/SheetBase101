@@ -31,11 +31,21 @@
     <p><strong>{{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
     {% if plan.debts %}
-      <p>What is this payment of {{ payment.amount|zl }} for? The oldest debts are ticked, as far as the money goes; change the ticks if it's for something else.</p>
+      {% if paying %}
+        <p>This payment of {{ payment.amount|zl }} is for “{{ paying.description }}”, so that stays ticked. Tick other debts too if it pays them as well.</p>
+      {% else %}
+        <p>What is this payment of {{ payment.amount|zl }} for? The oldest debts are ticked, as far as the money goes; change the ticks if it's for something else.</p>
+      {% endif %}
       <ul class="covers">
         {% for debt, ticked, status in plan.rows %}
           <li><label>
-            <input type="checkbox" name="debts" value="{{ debt.pk }}"{% if ticked %} checked{% endif %}>
+            {% if debt.pk == paying.pk %}
+              {# The debt being marked paid: always ticked. A disabled box isn't sent, so the hidden one is. #}
+              <input type="checkbox" checked disabled>
+              <input type="hidden" name="debts" value="{{ debt.pk }}">
+            {% else %}
+              <input type="checkbox" name="debts" value="{{ debt.pk }}"{% if ticked %} checked{% endif %}>
+            {% endif %}
             <span class="what">{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}
               {% if status == "paid" %}<span class="status paid">paid</span>
               {% elif status == "partly" %}<span class="status partly">paid, but {{ plan.leftover.amount|zl }} of it stays owed</span>
