@@ -263,8 +263,12 @@ class TransactionCorrection(models.Model):
             raise ValueError("A correction can't be edited.")
         with db_transaction.atomic():
             # Only when something the loan copies changed, so a date fix keeps edits made to the loan itself.
+            # A loan already paid back is history: a description fix leaves it as it was
+            # (money changes to it are refused in clean()).
             correcting_loan = not self.cancelled and self.original.is_loan() and (
-                self.changes_money() or self.description != self.original.current.description)
+                self.changes_money()
+                or (self.description != self.original.current.description
+                    and not self.original.leftovers.settled().exists()))
             super().save(*args, **kwargs)
             if self.cancelled:
                 from .payments import undo_payment

@@ -173,9 +173,13 @@ def correct_transaction(request, pk):
     if request.method == "POST" and form.is_valid():
         correction = form.save(commit=False)
         correction.created_by = request.user
-        correction.save()
-        messages.success(request, str(correction))
-        return redirect("transactions")
+        try:
+            correction.save()
+        except ValidationError as e:  # e.g. the loan got paid back after the form was checked
+            form.add_error(None, e)
+        else:
+            messages.success(request, str(correction))
+            return redirect("transactions")
     return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": False})
 
 
