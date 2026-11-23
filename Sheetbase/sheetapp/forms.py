@@ -1,11 +1,15 @@
+import json
 import uuid
 
 from django import forms
+from django.core.exceptions import ValidationError
+from django.db import models
 from django.utils import timezone
 from django.utils.text import slugify
 
 from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, PlannedTransaction, Transaction, TransactionCorrection, User
 from .splits import GROSZ, plan_split
+from .templatetags.money import show
 
 # dd/mm/yy everywhere. A text box (the browser's own date picker can't change its format);
 # the "datepicker" class turns it into a calendar on the page. 4-digit years are accepted too.
@@ -36,7 +40,54 @@ class TransactionForm(forms.ModelForm):
         self.fields["date"].input_formats = DATE_FORMATS
 
 
-class CorrectionForm(TransactionForm):
+class UpToDateMixin:
+    """For a form that changes a record which can change while the page is open (in another tab, or
+    by another member). The page keeps the values it showed (hidden `shown`). If the record has changed
+    since, nothing is saved: fields the user didn't touch take the newer values, what they typed is
+    kept, fields changed on both sides are flagged, and they're asked to check and send it again."""
+
+    again = "fields you didn't change now show the new values and what you typed is kept. Check them and save again"
+
+    def add_shown_field(self, record, names):
+        """`record` as it is now; `names` are the fields compared."""
+        self.record, self.compared = record, names
+        self.fields["shown"] = forms.CharField(widget=forms.HiddenInput, required=False, initial=self.encode())
+        if self.is_bound:
+            self.data = self.data.copy()  # so the newer values can be filled in
+
+    def stored(self, name):
+        """The record's value as stored: a user's pk rather than the user."""
+        return self.record._meta.get_field(name).value_from_object(self.record)
+
+    def encode(self):
+        return json.dumps({name: str(self.stored(name)) for name in self.compared})
+
+    def check_up_to_date(self, data):
+        """Call from clean(), before anything else."""
+        try:
+            raw = json.loads(self.data.get("shown") or "")
+            shown = {name: self.record._meta.get_field(name).to_python(raw[name]) for name in self.compared}
+        except (ValueError, KeyError, TypeError, ValidationError):
+            return  # nothing to compare with, e.g. a page opened before this check existed
+        changed = [name for name in self.compared if shown[name] != self.stored(name)]
+        if not changed:
+            return
+        for name in changed:
+            if name not in self.fields or name not in data:  # not on this form, or typed wrong anyway
+                continue
+            typed = data[name].pk if isinstance(data[name], models.Model) else data[name]
+            if typed == shown[name]:  # not touched: show the newer value
+                self.data[name] = self.stored(name)
+            elif typed != self.stored(name):
+                self.add_error(name, f"Changed meanwhile to {show(getattr(self.record, name))}. "
+                                     "Save again to replace it with what you typed.")
+        self.data["shown"] = self.encode()  # sent again, it's checked against the values now
+        what = ", ".join(f"{self.record._meta.get_field(n).verbose_name.removesuffix(' (zł)')} "
+                         f"(now {show(getattr(self.record, n))})" for n in changed)
+        raise forms.ValidationError(f"Changed after you opened this page: {what}. Nothing was saved – {self.again}.")
+
+
+class CorrectionForm(UpToDateMixin, TransactionForm):
     """The add form, pre-filled with the transaction's current values, plus a reason."""
 
     class Meta(TransactionForm.Meta):
@@ -48,16 +99,20 @@ class CorrectionForm(TransactionForm):
         kwargs["initial"] = {f: getattr(self.current, f) for f in CORRECTABLE_FIELDS}
         super().__init__(*args, **kwargs)
         self.instance.original = original
+        self.add_shown_field(self.current, CORRECTABLE_FIELDS)
 
     def clean(self):
         data = super().clean()
+        self.check_up_to_date(data)
         if all(data.get(f) == getattr(self.current, f) for f in CORRECTABLE_FIELDS):
             raise forms.ValidationError("Nothing was changed.")
         return data
 
 
-class CancelForm(forms.ModelForm):
+class CancelForm(UpToDateMixin, forms.ModelForm):
     """Cancelling = a correction that keeps the current values, marked cancelled. Only asks why."""
+
+    again = "check what it is now and cancel again"
 
     class Meta:
         model = TransactionCorrection
@@ -69,6 +124,12 @@ class CancelForm(forms.ModelForm):
             setattr(self.instance, f, getattr(original.current, f))
         self.instance.original = original
         self.instance.cancelled = True
+        self.add_shown_field(original.current, CORRECTABLE_FIELDS)
+
+    def clean(self):
+        data = super().clean()
+        self.check_up_to_date(data)
+        return data
 
 
 class PlannedTransactionForm(forms.ModelForm):
@@ -79,6 +140,19 @@ class PlannedTransactionForm(forms.ModelForm):
         fields = ["debtor", "creditor", "amount", "description", "tag"]
         field_classes = {"amount": AmountField}
         widgets = {"amount": forms.TextInput(attrs={"inputmode": "decimal"})}
+
+
+class EditPlannedForm(UpToDateMixin, PlannedTransactionForm):
+    """Editing an open debt; any member can, so someone else may change it while the page is open."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.add_shown_field(self.instance, PlannedTransactionForm.Meta.fields)
+
+    def clean(self):
+        data = super().clean()
+        self.check_up_to_date(data)
+        return data
 
 
 def new_id_field():

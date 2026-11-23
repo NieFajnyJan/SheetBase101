@@ -651,6 +651,46 @@ class CorrectionTests(TestCase):
         self.client.force_login(self.jan)
         self.assertContains(self.client.get(self.list_url), self.correct_url)
 
+    def shown(self, url):
+        """What a page opened now remembers having shown."""
+        return self.client.get(url).context["form"]["shown"].value()
+
+    def test_correction_from_an_old_page_keeps_the_newer_values(self):
+        old = self.shown(self.correct_url)  # a second tab, opened at 124,90 zł
+        self.assertRedirects(self.correct(amount="12,49", shown=self.shown(self.correct_url)), self.list_url)
+        # The old tab only fixes the description, but still holds the old amount.
+        page = self.correct(description="Kawa i ciastko", shown=old)
+        self.assertContains(page, "Changed after you opened this page: amount (now 12,49\xa0zł). Nothing was saved")
+        self.assertEqual(TransactionCorrection.objects.count(), 1)
+        form = page.context["form"]
+        self.assertEqual(Decimal(form["amount"].value()), Decimal("12.49"))  # the newer amount, not the old one
+        self.assertEqual(form["description"].value(), "Kawa i ciastko")  # what was typed is kept
+        # Sent again as it's now shown, it saves – without undoing the first correction.
+        again = {f: form[f].value() for f in ("amount", "payer", "recipient", "description", "reason", "shown")}
+        self.assertRedirects(self.client.post(self.correct_url, {**again, "date": today().strftime("%d/%m/%y")}),
+                             self.list_url)
+        current = self.row().current
+        self.assertEqual((current.amount, current.description), (Decimal("12.49"), "Kawa i ciastko"))
+
+    def test_correction_from_an_old_page_flags_a_field_changed_on_both(self):
+        old = self.shown(self.correct_url)
+        self.correct(amount="12,49", shown=self.shown(self.correct_url))
+        page = self.correct(amount="99,00", shown=old)
+        self.assertContains(page, "Changed meanwhile to 12,49\xa0zł. Save again to replace it")
+        self.assertEqual(page.context["form"]["amount"].value(), "99,00")  # what was typed is kept
+        self.assertEqual(TransactionCorrection.objects.count(), 1)
+
+    def test_cancel_from_an_old_page(self):
+        old = self.shown(self.cancel_url)
+        self.correct(amount="12,49", shown=self.shown(self.correct_url))
+        page = self.client.post(self.cancel_url, {"reason": "never happened", "shown": old})
+        self.assertContains(page, "Changed after you opened this page: amount (now 12,49\xa0zł)")
+        self.assertFalse(self.row().is_cancelled)
+        self.assertRedirects(self.client.post(self.cancel_url, {"reason": "never happened",
+                                                                "shown": page.context["form"]["shown"].value()}),
+                             self.list_url)
+        self.assertTrue(self.row().is_cancelled)
+
     def test_cancel(self):
         self.assertEqual(self.client.post(self.cancel_url, {"reason": ""}).status_code, 200)  # reason required
         self.assertFalse(TransactionCorrection.objects.exists())
@@ -1651,6 +1691,27 @@ class PlannedPageTests(TestCase):
         response = self.client.post(self.edit_url(d), {"debtor": self.jan.pk, "creditor": self.jan.pk,
                                                        "amount": "1", "description": "x"})
         self.assertContains(response, "must be different people")
+
+    def test_edit_from_an_old_page_keeps_someone_elses_change(self):
+        d = self.debt()  # ola owes jan 10,00 for Pizza
+        shown = lambda: self.client.get(self.edit_url(d)).context["form"]["shown"].value()
+        old = shown()
+        fields = {"debtor": self.ola.pk, "creditor": self.jan.pk, "amount": "10,00", "description": "Pizza", "tag": ""}
+        self.client.force_login(self.ewa)  # someone else raises the amount
+        self.assertRedirects(self.client.post(self.edit_url(d), {**fields, "amount": "40,00", "shown": shown()}),
+                             self.url)
+        self.client.force_login(self.jan)  # jan's old page only fixes the description
+        page = self.client.post(self.edit_url(d), {**fields, "description": "Pizza duża", "shown": old})
+        self.assertContains(page, "Changed after you opened this page: amount (now 40,00\xa0zł). Nothing was saved")
+        d.refresh_from_db()
+        self.assertEqual((d.amount, d.description), (Decimal("40.00"), "Pizza"))
+        form = page.context["form"]
+        self.assertEqual(Decimal(form["amount"].value()), Decimal("40.00"))
+        self.assertEqual(form["description"].value(), "Pizza duża")
+        again = {f: form[f].value() for f in ("debtor", "creditor", "amount", "description", "tag", "shown")}
+        self.assertRedirects(self.client.post(self.edit_url(d), again), self.url)
+        d.refresh_from_db()
+        self.assertEqual((d.amount, d.description), (Decimal("40.00"), "Pizza duża"))
 
     def test_creditor_deletes_after_warning(self):
         d = self.debt()
