@@ -112,16 +112,20 @@ def _write(fields):
     return entry
 
 
-def record(action, obj=None, before=None, after=None, request=None, user=None, username=None, model=None):
+def record(action, obj=None, before=None, after=None, request=None, user=None, username=None, model=None,
+           object_repr=None):
     """Logs one change (or login) once the main database commits it. Never breaks what's being logged:
-    a failure to write the entry is reported in the server log instead."""
+    a failure to write the entry is reported in the server log instead. `object_repr` names the record
+    when str(obj) can't, e.g. for the models a migration works with."""
     user_id, name, ip = actor(request, user)
+    if object_repr is None:
+        object_repr = str(obj) if obj is not None else ""
     fields = {
         "at": timezone.now(), "user_id": user_id, "username": username if username is not None else name,
         "ip": ip, "action": action, "before": before, "after": after,
         "model": model or (obj._meta.label_lower if obj is not None else ""),
         "object_id": str(obj.pk) if obj is not None and obj.pk is not None else "",
-        "object_repr": str(obj)[:300] if obj is not None else "",
+        "object_repr": object_repr[:300],
     }
 
     def write():

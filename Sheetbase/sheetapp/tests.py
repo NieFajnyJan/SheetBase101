@@ -1199,10 +1199,29 @@ class PayingDebtsTests(TestCase):
         d = self.debt("110.00", description="Krzesło", tag="krzesła")
         PlannedTransaction.objects.filter(pk=d.pk).make_group()
         pay = self.pay("100.00")
-        self.assertTrue(self.refresh(d)[0].is_settled)
+        d = self.refresh(d)[0]
+        self.assertTrue(d.is_settled)
         left = self.leftover(pay)
         self.assertEqual((left.debtor, left.creditor, left.amount, left.description, left.tag, left.group),
-                         (self.ola, self.jan, Decimal("10.00"), "Krzesło – rest", "krzesła", None))
+                         (self.ola, self.jan, Decimal("10.00"), "Krzesło – rest", "krzesła", d.group))
+
+    def split_shares(self):
+        """ola and ewa owe jan 30 zł each, from one split."""
+        shares = [self.debt("30.00", debtor=who, description="Pizza") for who in (self.ola, self.ewa)]
+        PlannedTransaction.objects.filter(pk__in=[s.pk for s in shares]).make_group()
+        return self.refresh(*shares)
+
+    def test_rest_of_a_paid_share_cant_be_deleted_on_its_own(self):
+        ola_share, ewa_share = self.split_shares()
+        rest = self.leftover(self.pay("10.00"))  # ola pays 10 of her 30: 20 still owed
+        self.assertEqual((rest.amount, rest.group), (Decimal("20.00"), ola_share.group))
+        url = reverse("delete_planned", args=[rest.pk])
+        page = self.client.get(url)
+        self.assertContains(page, "already paid “Pizza”")  # her share is shown with the rest
+        self.assertContains(page, "Pizza – rest")
+        self.client.post(url)
+        self.assertTrue(PlannedTransaction.objects.filter(pk=rest.pk).exists())
+        self.assertTrue(PlannedTransaction.objects.filter(pk=ewa_share.pk).exists())
 
     def ticked(self, amount):
         """Which debts the confirmation screen ticks by itself for a payment of this amount."""
@@ -1491,6 +1510,45 @@ class PayingDebtsTests(TestCase):
         self.assertTrue(pay.corrections.get().cancelled)
         self.assertFalse(self.refresh(d)[0].is_settled)
 
+
+class GroupRestsMigrationTests(TestCase):
+    """Rests added before they kept their debt's group join it when migrating, written to the audit log."""
+
+    databases = {"default", "audit"}
+
+    def test_rests_added_before_join_their_group(self):
+        import importlib
+
+        from django.db import connection
+        from django.db.migrations.executor import MigrationExecutor
+
+        from audit.models import Entry
+
+        # Models as the migration sees them: saving them doesn't reach the audit log's hooks.
+        apps = MigrationExecutor(connection).loader.project_state(("sheetapp", "0011_submission")).apps
+
+        jan, ola = (User.objects.create_user(n, f"{n}@example.com") for n in ("jan", "ola"))
+        shares = [PlannedTransaction.objects.create(debtor=ola, creditor=jan, amount=Decimal("30.00"),
+                                                    description="Pizza", created_by=jan) for _ in range(2)]
+        PlannedTransaction.objects.filter(pk__in=[s.pk for s in shares]).make_group()
+        group = PlannedTransaction.objects.get(pk=shares[0].pk).group
+
+        def pay(payer, recipient, amount):
+            payment = Transaction(amount=Decimal(amount), payer=payer, recipient=recipient, description="Zwrot",
+                                  created_by=payer)
+            record_payment(payment, chosen={shares[0].pk})
+            return payment.leftovers.get()
+
+        rest, overpaid = pay(ola, jan, "10.00"), pay(jan, ola, "5.00")  # the second is owed the other way
+        PlannedTransaction.objects.filter(pk__in=[rest.pk, overpaid.pk]).update(group=None)  # as they were added
+        migration = importlib.import_module("sheetapp.migrations.0012_group_rests")
+        with self.captureOnCommitCallbacks(execute=True):
+            migration.group_rests(apps, mock.Mock(connection=mock.Mock(alias="default")))
+        rest, overpaid = (PlannedTransaction.objects.get(pk=r.pk) for r in (rest, overpaid))
+        self.assertEqual((rest.group, overpaid.group), (group, None))
+        entries = Entry.objects.filter(model="sheetapp.plannedtransaction", object_id=str(rest.pk))
+        self.assertEqual([(e.action, e.after["group"], e.object_repr) for e in entries],
+                         [("update", str(group), "ola owes jan 20.00 zł – Pizza – rest")])
 
 class SentTwiceTests(TestCase):
     """The same add form sent twice (Add or Confirm clicked twice, the browser sending it again) adds it once."""
