@@ -61,12 +61,12 @@ def transactions(request):
                    "description": paying.description, "date": timezone.localdate().strftime(DATE_FORMATS[0]),
                    "submission": str(uuid.uuid4())}
         if request.method == "GET":  # straight to the confirmation screen; its Back opens the form
-            form = AddTransactionForm(details)
+            form = AddTransactionForm(details, paying=paying)
             if form.is_valid():
                 payment = form.save(commit=False)
                 payment.created_by = request.user
                 return confirm_payment(request, form, payment, paying)
-        form = AddTransactionForm(initial=details)
+        form = AddTransactionForm(initial=details, paying=paying)
     else:
         form = AddTransactionForm(initial={"payer": request.user})
     shop_form = ShopForm()
@@ -77,7 +77,7 @@ def transactions(request):
             messages.success(request, f"Added shop: {shop_form.save()}")
             return redirect(request.get_full_path())  # keeps the current filters
     elif request.method == "POST":
-        form = AddTransactionForm(request.POST)
+        form = AddTransactionForm(request.POST, paying=paying)
         if form.is_valid() and "back" not in request.POST:  # Back: the form again, still filled in
             obj = form.save(commit=False)
             obj.created_by = request.user
@@ -121,6 +121,20 @@ def debt_to_mark_paid(request):
     return debt
 
 
+def mark_paid_problem(paying, payment, chosen):
+    """Why a Mark paid payment can't be saved like this, if it can't: it must pay (at least part of)
+    the debt Mark paid was clicked on. Other debts it may pay too; a payment for them alone, or a loan,
+    is added on the Transactions page."""
+    if paying.pk not in chosen:
+        return (f"Tick the debt this payment is for: “{paying.description}”. To pay other debts or lend "
+                "money instead, add the payment on the Transactions page.")
+    plan = plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
+    if paying.pk not in {d.pk for d in plan.covered}:
+        return (f"The money runs out before “{paying.description}”, the debt this payment is for. "
+                "Untick other debts or raise the amount.")
+    return None
+
+
 def confirm_payment(request, form, payment, paying=None):
     """A payment between members: first shows which debts it settles and what's left over, with a
     tick box per debt to choose what it's for; saves only when Confirm is clicked."""
@@ -130,10 +144,9 @@ def confirm_payment(request, form, payment, paying=None):
     if "choosing" in request.POST:
         chosen = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
     plan = None
-    if "confirm" in request.POST and paying and not chosen:
-        # Marking a debt paid while paying for nothing would lend the money the other way instead.
-        messages.error(request, "Tick the debt this payment is for. To lend money instead, "
-                                "add the payment on the Transactions page.")
+    problem = paying and "confirm" in request.POST and mark_paid_problem(paying, payment, chosen)
+    if problem:
+        messages.error(request, problem)
     elif "confirm" in request.POST:
         try:
             # Checked before the plan: once the first click has paid the debts, the plan differs too.

@@ -258,12 +258,20 @@ class SplitMixin:
 
 class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
     """The add form on the Transactions page. Splitting a purchase: the shares become
-    planned transactions owed to whoever paid."""
+    planned transactions owed to whoever paid. With `paying` (Mark paid on that debt) it records
+    what the debtor paid the creditor: who paid whom is fixed, and it can't be split."""
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, paying=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_split_fields(split_amount=True)
         self.add_submission_field()
+        if paying:
+            # Disabled: whatever the page sends for these is ignored, the values below are used.
+            for name, who in (("payer", paying.debtor), ("recipient", paying.creditor)):
+                self.fields[name].disabled = True
+                self.initial[name] = who.pk
+            self.fields["split"].disabled = True
+            self.initial["split"] = False
 
     def split_creditor(self):
         return self.cleaned_data["payer"]

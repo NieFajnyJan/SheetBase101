@@ -58,7 +58,8 @@
       {% csrf_token %}
       <h2>Add done transaction</h2>
       {% if paying %}
-        <p class="msg">Marking as paid: <strong>{{ paying }}</strong>. Change the details, then click Add.</p>
+        <p class="msg">Marking as paid: <strong>{{ paying }}</strong>. Change the amount, description or date, then click Add.
+          “Paid by” and “paid to” stay as they are: for a different payment, <a href="{% url 'transactions' %}">add it here instead</a>.</p>
       {% else %}
         <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
       {% endif %}

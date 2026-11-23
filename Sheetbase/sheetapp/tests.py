@@ -1920,10 +1920,63 @@ class MarkPaidTests(TestCase):
         page = self.client.post(self.pay_url(d), self.data(d, back="", choosing="1", debts=[d.pk]))
         self.assertTemplateUsed(page, "sheetapp/transactions.html")
         form = page.context["form"]
+        # Who paid whom comes from the debt (fixed), the rest from what was sent.
         self.assertEqual((form["payer"].value(), form["recipient"].value(), form["amount"].value(),
-                          form["description"].value()), (str(self.ola.pk), str(self.jan.pk), "890.00", "Tort"))
+                          form["description"].value()), (self.ola.pk, self.jan.pk, "890.00", "Tort"))
         self.assertContains(page, "Marking as paid")
         self.assertFalse(Transaction.objects.exists())
+
+    def test_who_paid_whom_cant_be_changed(self):
+        d = self.debt()  # ola owes jan
+        shop = User.objects.get(username=SHOP_USERNAME)
+        self.client.force_login(self.ola)
+        form = self.client.post(self.pay_url(d), self.data(d, back="")).context["form"]
+        self.assertTrue(form.fields["payer"].disabled and form.fields["recipient"].disabled)
+        # Paid to a shop and Add: before, that saved a purchase straight away and left the debt open.
+        for change in ({"recipient": shop.pk}, {"payer": self.ewa.pk}):
+            screen = self.client.post(self.pay_url(d), self.data(d, **change))
+            self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+            payment = screen.context["payment"]
+            self.assertEqual((payment.payer, payment.recipient), (self.ola, self.jan), change)
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_cant_be_split(self):
+        d = self.debt()
+        self.client.force_login(self.ola)
+        screen = self.client.post(self.pay_url(d), self.data(d, split="on", participants=[self.ola.pk, self.jan.pk]))
+        self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+
+    def test_the_debt_stays_ticked(self):
+        other = self.debt(description="Inny tort")  # same amount, older
+        d = self.debt()
+        self.client.force_login(self.ola)
+        screen = self.client.get(self.pay_url(d))
+        self.assertContains(screen, '<input type="checkbox" checked disabled>', count=1)
+        self.assertContains(screen, f'<input type="hidden" name="debts" value="{d.pk}">')
+        self.assertContains(screen, f'<input type="checkbox" name="debts" value="{other.pk}">')
+        # Sent without it, ticking the other one instead: before, that paid the other one.
+        response = self.client.post(self.pay_url(d), self.data(d, confirm="", choosing="1", debts=[other.pk],
+                                                               plan=screen.context["plan"].signature()))
+        self.assertContains(response, "Tick the debt this payment is for: “Tort”")
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_the_money_must_reach_the_debt(self):
+        other = self.debt(description="Inny tort")  # older, so it's paid first when both are ticked
+        d = self.debt()
+        self.client.force_login(self.ola)
+        both = self.data(d, choosing="1", debts=[other.pk, d.pk])
+        screen = self.client.post(self.pay_url(d), both)
+        response = self.client.post(self.pay_url(d), {**both, "confirm": "",
+                                                       "plan": screen.context["plan"].signature()})
+        self.assertContains(response, "The money runs out before “Tort”")
+        self.assertFalse(Transaction.objects.exists())
+        # Enough for both: fine, it pays them both.
+        both["amount"] = "1780.00"
+        screen = self.client.post(self.pay_url(d), both)
+        self.assertRedirects(self.client.post(self.pay_url(d), {**both, "confirm": "",
+                                                                "plan": screen.context["plan"].signature()}),
+                             reverse("planned"))
+        self.assertFalse(PlannedTransaction.objects.open().exists())
 
     def test_confirm_with_nothing_ticked_is_refused(self):
         d = self.debt()
