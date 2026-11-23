@@ -157,13 +157,38 @@ def check_can_undo(payment: Transaction):
                               "Cancel that later payment first.")
 
 
-def correct_loan(payment: Transaction, correction):
-    """A payment that only made a loan was corrected: the loan follows the new amount, people and description."""
+# What a loan copies from the payment that made it: (the loan's field, the payment's).
+LOAN_COPIES = [("debtor_id", "recipient_id"), ("creditor_id", "payer_id"), ("amount", "amount"),
+               ("description", "description")]
+
+
+def loan_value(version, field):
+    """What the loan gets from this version of the payment for `field` (one of the payment's in LOAN_COPIES)."""
+    value = getattr(version, field)
+    return _clip(value) if field == "description" else value
+
+
+def loan_edits(payment: Transaction):
+    """The open loan a payment made, and what was changed on the loan itself since (on the Planned page):
+    {loan field: payment field} for the fields where it no longer says what the payment says.
+    (None, {}) when the payment made no loan, or it's been paid back."""
+    loan = payment.leftovers.open().select_related("debtor", "creditor").first()
+    if loan is None or not payment.is_loan():
+        return None, {}
+    current = payment.current
+    return loan, {lf: pf for lf, pf in LOAN_COPIES if getattr(loan, lf) != loan_value(current, pf)}
+
+
+def correct_loan(payment: Transaction, correction, previous, keep=()):
+    """A payment that only made a loan was corrected (`previous` is the version before): the loan follows
+    what the correction changed – the amount, people or description – except the loan fields in `keep`.
+    What wasn't corrected stays as it is on the loan, also when it was changed there."""
     loan = payment.leftovers.select_for_update().get()
     if loan.is_settled:
         raise ValidationError("This loan has already been paid back, so the payment can't be corrected.")
-    loan.debtor, loan.creditor = correction.recipient, correction.payer
-    loan.amount, loan.description = correction.amount, _clip(correction.description)
+    for loan_field, field in LOAN_COPIES:
+        if loan_field not in keep and getattr(correction, field) != getattr(previous, field):
+            setattr(loan, loan_field, loan_value(correction, field))
     loan.save()
 
 

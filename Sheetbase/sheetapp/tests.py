@@ -1360,6 +1360,46 @@ class PayingDebtsTests(TestCase):
                                                     "recipient": self.ewa.pk}), self.url)
         self.assertEqual(self.leftover(pay).debtor, self.ewa)
 
+    def edit_loan(self, pay, **fields):
+        """Changes the loan a payment made, as the Planned page does."""
+        PlannedTransaction.objects.filter(pk=self.leftover(pay).pk).update(**fields)
+
+    def test_loan_keeps_its_own_amount_when_only_the_description_is_corrected(self):
+        pay = self.pay("100.00")  # owed nothing: jan now owes ola 100
+        self.edit_loan(pay, amount=Decimal("70.00"))
+        url = reverse("correct_transaction", args=[pay.pk])
+        self.assertRedirects(self.client.post(url, {**self.data("100.00"), "description": "Pożyczka",
+                                                    "reason": "typo"}), self.url)
+        loan = self.leftover(pay)
+        self.assertEqual((loan.amount, loan.description), (Decimal("70.00"), "Pożyczka"))
+
+    def test_correcting_what_was_also_changed_on_the_loan_asks_which_to_keep(self):
+        pay = self.pay("100.00")
+        self.edit_loan(pay, amount=Decimal("70.00"))
+        url = reverse("correct_transaction", args=[pay.pk])
+        self.assertContains(self.client.get(url), "now jan owes ola 70,00\xa0zł for “Zwrot”")
+        fix = {**self.data("120.00"), "reason": "typo"}
+        page = self.client.post(url, fix)
+        self.assertContains(page, "amount: the loan says 70,00\xa0zł, the correction 120,00\xa0zł")
+        self.assertFalse(pay.corrections.exists())
+
+        self.assertRedirects(self.client.post(url, {**fix, "loan": "keep"}), self.url)
+        self.assertEqual(Transaction.objects.get(pk=pay.pk).current.amount, Decimal("120.00"))
+        self.assertEqual(self.leftover(pay).amount, Decimal("70.00"))
+
+        self.assertRedirects(self.client.post(url, {**self.data("130.00"), "reason": "typo", "loan": "follow"}),
+                             self.url)
+        self.assertEqual(self.leftover(pay).amount, Decimal("130.00"))
+
+    def test_loan_choice_only_when_the_loan_was_changed(self):
+        pay = self.pay("100.00")
+        url = reverse("correct_transaction", args=[pay.pk])
+        self.assertNotContains(self.client.get(url), 'name="loan"')
+        self.edit_loan(pay, description="<b>Taxi</b>")
+        page = self.client.get(url)
+        self.assertContains(page, 'name="loan"')
+        self.assertContains(page, "“&lt;b&gt;Taxi&lt;/b&gt;”")  # typed by a user: escaped
+
     def test_loan_correction_keeps_edits_to_the_loan_when_only_the_date_changes(self):
         pay = self.pay("100.00")
         PlannedTransaction.objects.filter(pk=self.leftover(pay).pk).update(description="Na taksówkę")
