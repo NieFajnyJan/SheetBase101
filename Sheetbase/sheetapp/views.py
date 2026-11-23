@@ -11,7 +11,8 @@ from django.views.decorators.http import require_GET
 
 from .forms import (DATE_FORMATS, AddPlannedForm, AddTransactionForm, CancelForm, CorrectionForm, EditPlannedForm,
                     HistoryFilterForm, ShopForm)
-from .models import AlreadyAdded, PlannedTransaction, Transaction, TransactionCorrection, needs_matching, save_once
+from .models import (AlreadyAdded, GroupChanged, PlannedTransaction, Transaction, TransactionCorrection, changed_rows,
+                     needs_matching, rows_signature, save_once)
 from .payments import PlanChanged, plan_payment, record_payment
 from .splits import save_split
 from .summary import all_time_summary, year_summary
@@ -144,6 +145,7 @@ def confirm_payment(request, form, payment, paying=None):
     if "choosing" in request.POST:
         chosen = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
     plan = None
+    changed_debts, leftover_changed = set(), False  # what differs from the screen Confirm was clicked on
     problem = paying and "confirm" in request.POST and mark_paid_problem(paying, payment, chosen)
     if problem:
         messages.error(request, problem)
@@ -157,13 +159,17 @@ def confirm_payment(request, form, payment, paying=None):
             return redirect("planned" if paying else request.get_full_path())
         except PlanChanged as changed:
             plan = changed.plan
-            messages.warning(request, "What this payment covers has changed – please check it again.")
+            changed_debts, leftover_changed = plan.changes_since(request.POST.get("plan", ""))
+            messages.warning(request, "What this payment covers has changed – please check it again. "
+                                      "Nothing was saved.")
         else:
             messages.success(request, f"Added: {payment}")
             return redirect("planned" if paying else request.get_full_path())
     plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
-    return render(request, "sheetapp/confirm_payment.html",
-                  {"form": form, "payment": payment, "plan": plan, "paying": paying})
+    return render(request, "sheetapp/confirm_payment.html", {
+        "form": form, "payment": payment, "plan": plan, "paying": paying,
+        "changed_debts": changed_debts, "leftover_changed": leftover_changed,
+    })
 
 
 def confirm_split(request, form, purchase=None):
@@ -275,15 +281,22 @@ def delete_planned(request, pk):
     rows = list(this.with_groups().select_related("debtor", "creditor"))
     # Refused when someone in the group already paid.
     problems = [f"{r.debtor} already paid “{r.description}”." for r in rows if r.is_settled]
+    changed = set()
     if request.method == "POST" and not problems:
+        shown = request.POST.get("rows")  # None from a page opened before this check: not compared
         try:
-            deleted = this.delete_with_groups()[0]
+            deleted = this.delete_with_groups(expected=shown)[0]
+        except GroupChanged:  # someone changed the group or a row in it after the page was opened
+            changed = changed_rows(rows, shown)
+            messages.warning(request, "What would be deleted changed after you opened this page – check it "
+                                      "and delete again. Nothing was deleted.")
         except ValidationError as e:  # someone paid in the meantime
             problems = e.messages
         else:
             messages.success(request, f"Deleted {deleted} planned transaction{'s' if deleted != 1 else ''}.")
             return redirect("planned")
-    return render(request, "sheetapp/planned_delete.html", {"rows": rows, "problems": problems})
+    return render(request, "sheetapp/planned_delete.html", {
+        "rows": rows, "problems": problems, "signature": rows_signature(rows), "changed": changed})
 
 
 @login_required

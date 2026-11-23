@@ -1178,6 +1178,37 @@ class PayingDebtsTests(TestCase):
         self.assertContains(page, "please check it again")
         self.assertFalse(Transaction.objects.exists())
 
+    def confirm_after(self, change, amount):
+        """The confirmation screen, then `change` to the debts, then Confirm: the page that comes back."""
+        screen = self.client.post(self.url, self.data(amount))
+        change()
+        return self.client.post(self.url, self.data(amount, confirm="", plan=screen.context["plan"].signature()))
+
+    def test_debt_description_changed_meanwhile_is_shown_again(self):
+        d, other = self.debt("90.00", description="Krzesło"), self.debt("20.00", description="Kawa")
+        page = self.confirm_after(
+            lambda: PlannedTransaction.objects.filter(pk=d.pk).update(description="Biurko"), "90.00")
+        self.assertContains(page, "please check it again")
+        self.assertFalse(Transaction.objects.exists())
+        self.assertContains(page, "Changed – check it", count=1)
+        self.assertEqual(page.context["changed_debts"], {d.pk})
+        # Confirmed again from that screen, it's saved.
+        self.assertRedirects(self.client.post(self.url, self.data(
+            "90.00", confirm="", plan=page.context["plan"].signature())), self.url)
+        self.assertEqual(self.refresh(d)[0].settled_by, Transaction.objects.get())
+
+    def test_amounts_changed_meanwhile_are_shown_again_even_when_they_add_up_the_same(self):
+        a, b = self.debt("30.00"), self.debt("50.00")
+
+        def change():  # still 80 together, so the same debts are paid exactly
+            PlannedTransaction.objects.filter(pk=a.pk).update(amount=Decimal("40.00"))
+            PlannedTransaction.objects.filter(pk=b.pk).update(amount=Decimal("40.00"))
+
+        page = self.confirm_after(change, "80.00")
+        self.assertContains(page, "please check it again")
+        self.assertEqual(page.context["changed_debts"], {a.pk, b.pk})
+        self.assertFalse(Transaction.objects.exists())
+
     # --- matching
     def test_exact(self):
         d = self.debt("90.00")
@@ -1818,6 +1849,33 @@ class PlannedPageTests(TestCase):
         self.assertTrue(PlannedTransaction.objects.exists())  # nothing deleted until confirmed
         self.assertRedirects(self.client.post(self.delete_url(d)), self.url)
         self.assertFalse(PlannedTransaction.objects.exists())
+
+    def shown_rows(self, d):
+        """What a Delete page opened now says it deletes."""
+        return self.client.get(self.delete_url(d)).context["signature"]
+
+    def test_delete_refused_when_a_row_changed_after_opening_the_page(self):
+        a, b = self.debt("100.00"), self.debt("100.00", debtor=self.ewa)
+        PlannedTransaction.objects.filter(pk__in=[a.pk, b.pk]).make_group()
+        shown = self.shown_rows(a)
+        PlannedTransaction.objects.filter(pk=b.pk).update(amount=Decimal("400.00"))  # someone else edits it
+        page = self.client.post(self.delete_url(a), {"rows": shown})
+        self.assertContains(page, "changed after you opened this page")
+        self.assertContains(page, "changed or added since, check it", count=1)
+        self.assertContains(page, "400,00")
+        self.assertEqual(PlannedTransaction.objects.count(), 2)
+        # Delete clicked on the page as it's shown now: deleted.
+        self.assertRedirects(self.client.post(self.delete_url(a), {"rows": page.context["signature"]}), self.url)
+        self.assertFalse(PlannedTransaction.objects.exists())
+
+    def test_delete_refused_when_the_group_grew_after_opening_the_page(self):
+        a, other = self.debt(), self.debt(debtor=self.ewa, description="Kawa")
+        shown = self.shown_rows(a)  # a alone
+        PlannedTransaction.objects.filter(pk__in=[a.pk, other.pk]).make_group()  # grouped in the admin
+        page = self.client.post(self.delete_url(a), {"rows": shown})
+        self.assertContains(page, "Nothing was deleted")
+        self.assertEqual(page.context["changed"], {other.pk})
+        self.assertEqual(PlannedTransaction.objects.count(), 2)
 
     def test_any_member_can_edit_or_delete(self):
         for who in (self.ola, self.ewa):  # the debtor and a bystander
