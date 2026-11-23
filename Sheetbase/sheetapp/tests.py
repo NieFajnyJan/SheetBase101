@@ -24,6 +24,7 @@ from .models import (
     Transaction,
     TransactionCorrection,
     User,
+    earliest_allowed_date,
     save_once,
     validate_transaction_date,
 )
@@ -339,13 +340,35 @@ class AddTransactionTests(TestCase):
             "description": "x", "date": today().strftime("%d/%m/%y")})
         self.assertRedirects(response, f"{self.url}?payer={self.jan.pk}")
 
-    def test_date_is_dd_mm_yy(self):
+    def test_date_is_dd_mm_yyyy(self):
         self.client.force_login(self.jan)
-        self.assertContains(self.client.get(self.url), f'value="{today():%d/%m/%y}"')  # default shown as dd/mm/yy
-        self.post(date=f"{today():%d/%m/%Y}")  # a 4-digit year works too
-        self.assertEqual(Transaction.objects.get().date, today())
-        response = self.post(date=today().isoformat())  # yyyy-mm-dd is rejected
-        self.assertTrue(response.context["form"].errors["date"])
+        page = self.client.get(self.url)
+        self.assertContains(page, f'value="{today():%d.%m.%Y}"')  # default shown as dd.mm.yyyy
+        self.assertContains(page, "dd.mm.yyyy, e.g. 20.11.2026")  # the format, next to the box for good
+        # Typed: dots or slashes, a four- or two-digit year.
+        for typed in (f"{today():%d.%m.%Y}", f"{today():%d/%m/%Y}", f"{today():%d.%m.%y}", f"{today():%d/%m/%y}",
+                      f"{today().day}.{today().month}.{today().year}"):  # no leading zeros
+            response = self.post(date=typed)
+            self.assertEqual(response.status_code, 302, typed)
+        self.assertEqual(set(Transaction.objects.values_list("date", flat=True)), {today()})
+        # Refused: yyyy-mm-dd, mixed separators, and a day that doesn't exist (not moved to the next month).
+        for typed in (today().isoformat(), f"{today():%d.%m/%Y}", f"31.02.{today().year}"):
+            response = self.post(date=typed)
+            self.assertTrue(response.context["form"].errors["date"], typed)
+            self.assertContains(response, f'value="{typed}"')  # what was typed is kept, to fix
+        self.assertEqual(Transaction.objects.count(), 5)
+
+    def test_calendar_gets_the_servers_limits(self):
+        self.client.force_login(self.jan)
+        page = self.client.get(self.url)
+        self.assertContains(page, f'data-min="{earliest_allowed_date(today()).isoformat()}"')
+        self.assertContains(page, f'data-max="{today().isoformat()}"')
+
+    def test_grouped_amount_accepted(self):
+        self.client.force_login(self.jan)
+        for typed in ("1 234,50", "1\xa0234,50", "1 234.50"):  # space, non-breaking, thin
+            self.post(amount=typed)
+        self.assertEqual(list(Transaction.objects.values_list("amount", flat=True)), [Decimal("1234.50")] * 3)
 
     def test_comma_amount_accepted(self):
         self.client.force_login(self.jan)
@@ -385,9 +408,12 @@ class TransactionListTests(TestCase):
         self.assertEqual(response.context["total"], Decimal("1234.80"))
         self.assertContains(response, "1\xa0234,80\xa0zł")  # shown as 1 234,80 zł
 
-    def test_dates_shown_as_dd_mm_yy(self):
-        self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
-        self.assertContains(self.client.get(self.url), date(today().year, 1, 5).strftime("05/01/%y"))
+    def test_dates_shown_as_dd_mm_yyyy(self):
+        paid = date(today().year, 1, 5)
+        self.make("1.00", self.jan, self.shop, paid)
+        # Readable by people and, without guessing the order, by software.
+        self.assertContains(self.client.get(self.url), f'<time datetime="{paid.isoformat()}">05.01.{paid.year}</time>',
+                            html=True)
 
     def test_shows_date_paid_and_date_added(self):
         t = self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
@@ -396,8 +422,8 @@ class TransactionListTests(TestCase):
             created_at=datetime(today().year, 2, 3, 23, 30, tzinfo=ZoneInfo("UTC")))
         response = self.client.get(self.url)
         self.assertContains(response, "Date paid")
-        self.assertContains(response, date(today().year, 1, 5).strftime("05/01/%y"))
-        self.assertContains(response, date(today().year, 2, 4).strftime("04/02/%y"))  # 23:30 UTC = 00:30 in Warsaw
+        self.assertContains(response, f"05.01.{today().year}")
+        self.assertContains(response, f"04.02.{today().year}")  # 23:30 UTC = 00:30 in Warsaw
 
     def test_newest_first(self):
         self.make("1.00", self.jan, self.shop, today() - timedelta(days=3))

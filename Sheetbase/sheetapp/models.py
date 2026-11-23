@@ -162,7 +162,7 @@ class Transaction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.date:%d/%m/%y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
+        return f"{self.date:%d.%m.%Y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
 
     def clean(self):
         check_parties(self)
@@ -262,7 +262,7 @@ class TransactionCorrection(models.Model):
 
     def __str__(self):
         what = "Cancelled" if self.cancelled else "Corrected"
-        return f"{what}: {self.date:%d/%m/%y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
+        return f"{what}: {self.date:%d.%m.%Y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
 
     def clean(self):
         if not self.original_id:

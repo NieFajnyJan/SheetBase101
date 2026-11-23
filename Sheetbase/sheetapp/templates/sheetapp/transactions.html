@@ -103,7 +103,7 @@
             {% with c=t.current paid_for=t.paid_for %}
             <tr id="t-{{ t.pk }}" class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
                 {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
-              <td class="val">{{ c.date|date:"d/m/y" }}</td><td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
+              <td class="val">{{ c.date|day }}</td><td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
               <td class="desc"><span class="val">{{ c.description }}</span>
                 {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}">Cancelled</button>
                 {% elif t.is_corrected %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}">corrected ×{{ t.corrections.all|length }}</button>{% endif %}
@@ -118,7 +118,7 @@
                     summaries leave it out. Correct who paid whom, or cancel it.</div>
                 {% endif %}
               </td>
-              <td class="num val">{{ c.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|date:"d/m/y" }}</td>
+              <td class="num val">{{ c.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|day }}</td>
               <td class="actions">{% if t|correctable_by:user %}<a href="{% url 'correct_transaction' t.pk %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}">Cancel</a>{% endif %}</td>
             </tr>
             {% if t.is_corrected %}
@@ -130,12 +130,12 @@
                         <strong>{% if e.correction.cancelled %}Cancelled{% else %}Corrected{% endif %} by {{ e.correction.created_by }}</strong>
                         {% for label, old, new in e.changes %}· {{ label }}: {{ old|show }} → {{ new|show }} {% endfor %}
                         <div>Reason: {{ e.correction.reason }}</div>
-                        <div class="who">{{ e.correction.created_at|date:"d/m/y H:i" }}</div>
+                        <div class="who">{{ e.correction.created_at|date:"d.m.Y H:i" }}</div>
                       </li>
                     {% endfor %}
                     <li>
-                      <strong>Original</strong> · {{ t.date|date:"d/m/y" }} · {{ t.payer }} → {{ t.recipient }} · {{ t.description }} · {{ t.amount|zl }}
-                      <div class="who">added by {{ t.created_by }}, {{ t.created_at|date:"d/m/y H:i" }}</div>
+                      <strong>Original</strong> · {{ t.date|day }} · {{ t.payer }} → {{ t.recipient }} · {{ t.description }} · {{ t.amount|zl }}
+                      <div class="who">added by {{ t.created_by }}, {{ t.created_at|date:"d.m.Y H:i" }}</div>
                     </li>
                   </ol>
                 </td>
