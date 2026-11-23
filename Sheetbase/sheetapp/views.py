@@ -9,8 +9,8 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from .forms import (DATE_FORMATS, AddPlannedForm, AddTransactionForm, CancelForm, CorrectionForm, HistoryFilterForm,
-                    PlannedTransactionForm, ShopForm)
+from .forms import (DATE_FORMATS, AddPlannedForm, AddTransactionForm, CancelForm, CorrectionForm, EditPlannedForm,
+                    HistoryFilterForm, ShopForm)
 from .models import AlreadyAdded, PlannedTransaction, Transaction, TransactionCorrection, needs_matching, save_once
 from .payments import PlanChanged, plan_payment, record_payment
 from .splits import save_split
@@ -247,7 +247,7 @@ def open_debt(pk):
 @login_required
 def edit_planned(request, pk):
     debt = open_debt(pk)
-    form = PlannedTransactionForm(request.POST or None, instance=debt)
+    form = EditPlannedForm(request.POST or None, instance=debt)
     if request.method == "POST" and form.is_valid():
         messages.success(request, f"Saved: {form.save()}")
         return redirect("planned")
