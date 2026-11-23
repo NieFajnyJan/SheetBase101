@@ -9,10 +9,27 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
-from .forms import (DATE_FORMATS, AddPlannedForm, AddTransactionForm, CancelForm, CorrectionForm, EditPlannedForm,
-                    HistoryFilterForm, ShopForm)
-from .models import (AlreadyAdded, GroupChanged, PlannedTransaction, Transaction, TransactionCorrection, changed_rows,
-                     needs_matching, rows_signature, save_once)
+from .forms import (
+    DATE_FORMATS,
+    AddPlannedForm,
+    AddTransactionForm,
+    CancelForm,
+    CorrectionForm,
+    EditPlannedForm,
+    HistoryFilterForm,
+    ShopForm,
+)
+from .models import (
+    AlreadyAdded,
+    GroupChanged,
+    PlannedTransaction,
+    Transaction,
+    TransactionCorrection,
+    changed_rows,
+    needs_matching,
+    rows_signature,
+    save_once,
+)
 from .payments import PlanChanged, plan_payment, record_payment
 from .splits import save_split
 from .summary import all_time_summary, year_summary
@@ -23,18 +40,12 @@ def corrections():
         "payer", "recipient", "created_by"))
 
 
-def with_source(debts):
-    """Debts with the purchase each came from (if any), as it is now, prefetched."""
-    return debts.select_related("source").prefetch_related(
-        Prefetch("source__corrections", queryset=TransactionCorrection.objects.all()))
-
-
 def transactions_with_history():
     """Done transactions with their current values annotated, every version prefetched, and the debts
     each payment paid."""
     return Transaction.objects.with_current().select_related("payer", "recipient", "created_by").prefetch_related(
         corrections(),
-        Prefetch("settled_debts", queryset=with_source(PlannedTransaction.objects.order_by("created_at", "pk"))))
+        Prefetch("settled_debts", queryset=PlannedTransaction.objects.order_by("created_at", "pk")))
 
 
 def home(request):
@@ -191,7 +202,8 @@ def confirm_split(request, form, purchase=None):
 
 def own_transaction(request, pk):
     """The transaction, if the logged-in user may correct it; otherwise 403."""
-    transaction = get_object_or_404(transactions_with_history(), pk=pk)
+    candidates = Transaction.objects.select_related("payer", "recipient").prefetch_related(corrections())
+    transaction = get_object_or_404(candidates, pk=pk)
     if not transaction.can_be_corrected_by(request.user):
         raise PermissionDenied("Only whoever added a transaction can correct it, and not once it's cancelled.")
     return transaction
@@ -199,36 +211,31 @@ def own_transaction(request, pk):
 
 @login_required
 def correct_transaction(request, pk):
-    transaction = own_transaction(request, pk)
-    form = CorrectionForm(request.POST or None, original=transaction)
-    if request.method == "POST" and form.is_valid():
-        correction = form.save(commit=False)
-        correction.created_by = request.user
-        try:
-            correction.save()
-        except ValidationError as e:  # e.g. the loan got paid back after the form was checked
-            form.add_error(None, e)
-        else:
-            messages.success(request, str(correction))
-            return redirect("transactions")
-    return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": False})
+    return _change_transaction(request, pk, cancelling=False)
 
 
 @login_required
 def cancel_transaction(request, pk):
+    return _change_transaction(request, pk, cancelling=True)
+
+
+def _change_transaction(request, pk, *, cancelling):
     transaction = own_transaction(request, pk)
-    form = CancelForm(request.POST or None, original=transaction)
+    form_class = CancelForm if cancelling else CorrectionForm
+    form = form_class(request.POST or None, original=transaction)
     if request.method == "POST" and form.is_valid():
         correction = form.save(commit=False)
         correction.created_by = request.user
         try:
             correction.save()
-        except ValidationError as e:  # the leftover got paid after the form was checked
+        except ValidationError as e:  # a related debt may have been paid after form validation
             form.add_error(None, e)
         else:
             messages.success(request, str(correction))
             return redirect("transactions")
-    return render(request, "sheetapp/correct.html", {"form": form, "transaction": transaction, "cancelling": True})
+    return render(request, "sheetapp/correct.html", {
+        "form": form, "transaction": transaction, "cancelling": cancelling,
+    })
 
 
 @login_required
@@ -247,7 +254,8 @@ def planned(request):
         else:
             messages.success(request, f"Added: {debt}")
         return redirect("planned")
-    debts = with_source(PlannedTransaction.objects.open().select_related("debtor", "creditor", "created_by"))
+    debts = (PlannedTransaction.objects.open().select_related("debtor", "creditor", "source")
+             .prefetch_related("source__corrections"))
     return render(request, "sheetapp/planned.html", {
         "form": form,
         "debts": debts,

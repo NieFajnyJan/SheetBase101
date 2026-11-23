@@ -3,7 +3,7 @@
 
 {% block title %}{% if cancelling %}Cancel{% else %}Correct{% endif %} transaction · SheetBase{% endblock %}
 
-{% block extra_head %}{% include "sheetapp/_datepicker.html" %}{% endblock %}
+{% block extra_head %}{% if not cancelling %}{% include "sheetapp/_datepicker.html" %}{% endif %}{% endblock %}
 
 {% block content %}
   {% with c=transaction.current %}

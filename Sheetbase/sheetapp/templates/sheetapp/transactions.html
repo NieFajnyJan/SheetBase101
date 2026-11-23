@@ -100,16 +100,16 @@
         <thead><tr><th>Date paid</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th><th>Added</th><th></th></tr></thead>
         <tbody>
           {% for t in transactions %}
-            {% with c=t.current %}
+            {% with c=t.current paid_for=t.paid_for %}
             <tr id="t-{{ t.pk }}" class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
                 {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
               <td class="val">{{ c.date|date:"d/m/y" }}</td><td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
               <td class="desc"><span class="val">{{ c.description }}</span>
                 {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}">Cancelled</button>
                 {% elif t.is_corrected %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}">corrected ×{{ t.corrections.all|length }}</button>{% endif %}
-                {% if t.paid_for %}
+                {% if paid_for %}
                   <div class="paid-for">Paid for:
-                    {% for d in t.paid_for %}{% if d.source %}<a href="{% url 'transactions' %}#t-{{ d.source_id }}">{{ d.description }}</a>{% else %}{{ d.description }}{% endif %} {{ d.amount|zl }}{% if not forloop.last %}; {% endif %}{% endfor %}
+                    {% for d in paid_for %}{% if d.source_id %}<a href="{% url 'transactions' %}#t-{{ d.source_id }}">{{ d.description }}</a>{% else %}{{ d.description }}{% endif %} {{ d.amount|zl }}{% if not forloop.last %}; {% endif %}{% endfor %}
                   </div>
                 {% endif %}
                 {% if c.payer.is_shop and c.recipient.is_shop and not t.is_cancelled %}

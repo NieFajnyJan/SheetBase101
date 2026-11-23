@@ -189,7 +189,8 @@ class Transaction(models.Model):
 
     @property
     def is_cancelled(self):
-        return self.current is not self and self.current.cancelled
+        current = self.current
+        return current is not self and current.cancelled
 
     @property
     def is_corrected(self):
@@ -266,37 +267,41 @@ class TransactionCorrection(models.Model):
     def clean(self):
         if not self.original_id:
             return
+        # Imported here because payments imports these models.
+        from .payments import check_can_undo
+
+        original = self.original
         # A cancelled transaction stays cancelled – record a new one instead.
-        if self.original.corrections.filter(cancelled=True).exclude(pk=self.pk).exists():
+        if original.corrections.filter(cancelled=True).exclude(pk=self.pk).exists():
             raise ValidationError("This transaction is cancelled and can't be corrected any more.")
         if self.cancelled:
-            from .payments import check_can_undo
             from .splits import check_can_cancel_shares
 
-            check_can_undo(self.original)
-            check_can_cancel_shares(self.original)
-        elif self.payer_id and self.recipient_id:
-            # Not when cancelling: that's how one between two shops, recorded before this check, goes away.
-            check_parties(self)
-            current = self.original.current
-            if self.changes_money() and self.original.split_shares.exists():
-                raise ValidationError("This purchase was split between people, so its amount, “paid by” and "
-                                      "“paid to” can't be changed. Cancel it and add it again instead.")
-            if self.original.is_loan():
-                # Paid no debts, so the loan can simply follow the correction – unless it's been paid back.
-                if self.changes_money():
-                    from .payments import check_can_undo
-
-                    check_can_undo(self.original)
-                    if not needs_matching(self.payer, self.recipient):
-                        raise ValidationError("A payment between members can't be corrected into a purchase. "
-                                              "Cancel it and add the purchase instead.")
-            elif self.changes_money() and (
-                    self.original.touches_debts()
-                    # A purchase corrected into a payment between members would skip paying debts.
-                    or needs_matching(self.payer, self.recipient) and not needs_matching(current.payer, current.recipient)):
-                raise ValidationError("This payment pays debts between members, so its amount, “paid by” and "
-                                      "“paid to” can't be changed. Cancel it and add it again instead.")
+            check_can_undo(original)
+            check_can_cancel_shares(original)
+            return
+        if not (self.payer_id and self.recipient_id):
+            return
+        # Not when cancelling (above): that's how one between two shops, recorded before this check, goes away.
+        check_parties(self)
+        if not self.changes_money():
+            return
+        if original.split_shares.exists():
+            raise ValidationError("This purchase was split between people, so its amount, “paid by” and "
+                                  "“paid to” can't be changed. Cancel it and add it again instead.")
+        if original.is_loan():
+            # Paid no debts, so the loan can simply follow the correction – unless it's been paid back.
+            check_can_undo(original)
+            if not needs_matching(self.payer, self.recipient):
+                raise ValidationError("A payment between members can't be corrected into a purchase. "
+                                      "Cancel it and add the purchase instead.")
+            return
+        current = original.current
+        if original.touches_debts() or (
+                # A purchase corrected into a payment between members would skip paying debts.
+                needs_matching(self.payer, self.recipient) and not needs_matching(current.payer, current.recipient)):
+            raise ValidationError("This payment pays debts between members, so its amount, “paid by” and "
+                                  "“paid to” can't be changed. Cancel it and add it again instead.")
 
     # Loan fields (see payments.LOAN_COPIES) that keep their own value although this correction changes
     # what they were copied from: chosen on the correction form when the loan was changed separately.
