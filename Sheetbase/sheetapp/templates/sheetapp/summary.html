@@ -48,7 +48,7 @@
             <tr>
               <td>{{ r.member }}</td>
               {% if r.first_date %}
-                <td>{{ r.first_date|date:"d/m/y" }}</td><td class="num">{{ r.months }}</td>
+                <td>{{ r.first_date|day }}</td><td class="num">{{ r.months }}</td>
               {% else %}
                 <td class="zero" colspan="2">no transactions yet</td>
               {% endif %}

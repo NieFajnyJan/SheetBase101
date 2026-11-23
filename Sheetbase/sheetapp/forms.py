@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from datetime import date
 
@@ -16,24 +17,27 @@ from .models import (
     Transaction,
     TransactionCorrection,
     User,
+    earliest_allowed_date,
 )
 from .payments import loan_edits
 from .splits import GROSZ, plan_split
 from .templatetags.money import show
 
-# dd/mm/yy everywhere. A text box (the browser's own date picker can't change its format);
-# the "datepicker" class turns it into a calendar on the page. 4-digit years are accepted too.
-DATE_FORMATS = ["%d/%m/%y", "%d/%m/%Y"]
-DATE_WIDGET = forms.DateInput(format=DATE_FORMATS[0],
-                              attrs={"class": "datepicker", "placeholder": "dd/mm/yy", "autocomplete": "off"})
+# Dates are shown as dd.mm.yyyy (20.11.2026): a four-digit year, and the order Polish users expect.
+# Typed, slashes and two-digit years work too (each format needs one separator throughout).
+# A text box, not the browser's own date input (its format can't be set); the "datepicker" class
+# adds a calendar button next to it. The first format is the one shown.
+DATE_FORMATS = ["%d.%m.%Y", "%d/%m/%Y", "%d.%m.%y", "%d/%m/%y"]
+DATE_HINT = "dd.mm.yyyy, e.g. 20.11.2026"
+DATE_WIDGET = forms.DateInput(format=DATE_FORMATS[0], attrs={"class": "datepicker", "autocomplete": "off"})
 
 
 class AmountField(forms.DecimalField):
-    """Accepts both 12.49 and 12,49 – Polish users type commas."""
+    """Accepts 12.49 and 12,49 – Polish users type commas – and digits grouped with spaces (1 234,50)."""
 
     def to_python(self, value):
         if isinstance(value, str):
-            value = value.replace(",", ".")
+            value = re.sub(r"\s", "", value).replace(",", ".")  # \s: non-breaking and thin spaces too
         return super().to_python(value)
 
 
@@ -42,12 +46,19 @@ class TransactionForm(forms.ModelForm):
         model = Transaction
         fields = CORRECTABLE_FIELDS
         field_classes = {"amount": AmountField}
+        help_texts = {"date": DATE_HINT}
         # A text box, not type=number: number boxes reject a comma in some browsers.
         widgets = {"date": DATE_WIDGET, "amount": forms.TextInput(attrs={"inputmode": "decimal"})}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["date"].input_formats = DATE_FORMATS
+        date_field = self.fields["date"]
+        date_field.input_formats = DATE_FORMATS
+        today = timezone.localdate()
+        date_field.widget.attrs.update({
+            "data-min": earliest_allowed_date(today).isoformat(),
+            "data-max": today.isoformat(),
+        })
         # Which combinations make sense, next to the two lists (one side is always a member).
         self.fields["payer"].help_text = "A member – or the shop, when it pays money back (a return)."
         self.fields["recipient"].help_text = "The shop, for a purchase – or the member paid."

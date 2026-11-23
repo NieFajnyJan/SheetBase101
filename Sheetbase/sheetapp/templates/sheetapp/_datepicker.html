@@ -1,15 +1,101 @@
-{# Calendar for “date paid” fields (class=datepicker). #}
+{# A calendar button next to each “date paid” box (class=datepicker). #}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
+<style>
+  .date-row { display: flex; gap: .4rem; align-items: stretch; }
+  .date-row input { flex: 1; min-width: 0; }
+  .date-pick { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 2.5rem;
+               background: #fff; color: #2b3a55; border: 1px solid #2b3a55; border-radius: 4px; cursor: pointer; }
+  .date-pick:focus-visible, .flatpickr-prev-month:focus-visible, .flatpickr-next-month:focus-visible {
+    outline: 3px solid #2b3a55; outline-offset: 2px; }
+</style>
 <script>
-  // Calendar for "date paid" in dd/mm/yy. Same limits as the server: not in the future, max 2 years back.
+  // The box itself stays an ordinary text box: what's typed in it is sent as it is, and the server checks it
+  // (and says what's wrong). The calendar sits on a button beside it and only fills the box in when a day
+  // is picked – so it never rewrites or clears a typed date. Without the calendar script (no internet)
+  // there's simply no button.
   document.addEventListener("DOMContentLoaded", () => {
-    if (!window.flatpickr) return;  // no CDN -> the text box still works
-    const twoYearsBack = new Date();
-    twoYearsBack.setFullYear(twoYearsBack.getFullYear() - 2);
-    flatpickr(".datepicker", {
-      dateFormat: "d/m/y", allowInput: true, maxDate: "today", minDate: twoYearsBack,
-      locale: { firstDayOfWeek: 1 },
+    if (!window.flatpickr) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // The same dates the server accepts: dd.mm.yyyy or dd/mm/yyyy, or with a two-digit year
+    // (as Python reads %y: 00–68 → 2000s). A date that doesn't exist (31.02) is no date.
+    const parse = text => {
+      const m = text.trim().match(/^(\d{1,2})([./])(\d{1,2})\2(\d{2}|\d{4})$/);
+      if (!m) return null;
+      let year = Number(m[4]);
+      if (m[4].length === 2) year += year < 69 ? 2000 : 1900;
+      const date = new Date(year, Number(m[3]) - 1, Number(m[1]));
+      return date.getFullYear() === year && date.getMonth() === Number(m[3]) - 1 && date.getDate() === Number(m[1])
+        ? date : null;
+    };
+    const isoDate = iso => {  // "2026-11-20" -> that day, local time
+      const [y, m, d] = iso.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    };
+
+    document.querySelectorAll("input.datepicker").forEach(input => {
+      const row = document.createElement("span");
+      row.className = "date-row";
+      input.replaceWith(row);
+      row.append(input);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "date-pick";
+      button.setAttribute("aria-label", "Pick the date on a calendar");
+      button.setAttribute("aria-expanded", "false");
+      button.innerHTML = '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" ' +
+        'stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="16" rx="2"/>' +
+        '<path d="M3 10h18M8 3v4M16 3v4"/></svg>';
+      row.append(button);
+
+      const picker = flatpickr(button, {
+        dateFormat: "d.m.Y",
+        minDate: input.dataset.min ? isoDate(input.dataset.min) : null,
+        maxDate: input.dataset.max ? isoDate(input.dataset.max) : null,
+        clickOpens: false,       // opened by the click handler below, not on focus (tabbing past it)
+        disableMobile: true,     // no separate phone date box: the labelled text box stays the only one
+        animate: !reducedMotion,
+        positionElement: input,
+        locale: { firstDayOfWeek: 1 },
+        onOpen: [() => {
+          // Start from what's typed, if it's a date the calendar can show.
+          const typed = parse(input.value);
+          if (typed) picker.setDate(typed, false); else picker.clear(false);
+          picker.jumpToDate(typed || picker.config.maxDate || new Date());
+          button.setAttribute("aria-expanded", "true");
+        }],
+        onClose: [() => button.setAttribute("aria-expanded", "false")],
+        onChange: [dates => {
+          if (!dates.length) return;
+          input.value = picker.formatDate(dates[0], picker.config.dateFormat);
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+        }],
+        onReady: [(_, __, fp) => {
+          // The month arrows are plain icons: give them names and make them work from the keyboard.
+          const arrows = [[fp.prevMonthNav, "Previous month"], [fp.nextMonthNav, "Next month"]];
+          arrows.forEach(([arrow, name], i) => {
+            arrow.setAttribute("role", "button");
+            arrow.setAttribute("tabindex", "0");
+            arrow.setAttribute("aria-label", name);
+            arrow.addEventListener("keydown", e => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                arrow.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+                // At the first or last month allowed the arrow hides itself: keep the focus in the calendar.
+                if (arrow.classList.contains("flatpickr-disabled")) arrows[1 - i][0].focus();
+              }
+            });
+          });
+        }],
+      });
+      // flatpickr makes the element it's on type="text" and readonly, as it expects a text box. On a button
+      // an unknown type means "submit" – it would send the form – so it goes back to an ordinary button.
+      button.type = "button";
+      button.removeAttribute("readonly");
+      // Click (or Enter/Space on the button) opens it; picking a day, Escape or clicking elsewhere closes it.
+      // Arrow down moves into the days.
+      button.addEventListener("click", () => picker.open());
     });
   });
 </script>
