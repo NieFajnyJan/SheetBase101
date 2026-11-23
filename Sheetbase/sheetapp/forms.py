@@ -5,9 +5,11 @@ from django import forms
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
+from django.utils.html import format_html
 from django.utils.text import slugify
 
 from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, PlannedTransaction, Transaction, TransactionCorrection, User
+from .payments import loan_edits
 from .splits import GROSZ, plan_split
 from .templatetags.money import show
 
@@ -100,13 +102,46 @@ class CorrectionForm(UpToDateMixin, TransactionForm):
         super().__init__(*args, **kwargs)
         self.instance.original = original
         self.add_shown_field(self.current, CORRECTABLE_FIELDS)
+        # The loan this payment made, if it was changed on the Planned page since: correcting what was
+        # changed there too then needs a choice – does the loan follow the correction or keep its own value?
+        self.loan, self.loan_edits = loan_edits(original)
+        if self.loan_edits:
+            loan = self.loan
+            self.fields["loan"] = forms.ChoiceField(
+                label="The loan it made", required=False, widget=forms.RadioSelect,
+                choices=[("follow", "Change the loan to match the correction"), ("keep", "Keep the loan as it is")],
+                # format_html: help text isn't escaped when shown, and the names and description are typed by users.
+                help_text=format_html("Changed on the Planned page since: now {} owes {} {} for “{}”. Only needed "
+                                      "when you correct what was changed there.",
+                                      loan.debtor, loan.creditor, show(loan.amount), loan.description))
+            self.order_fields(CORRECTABLE_FIELDS + ["loan", "reason"])
 
     def clean(self):
         data = super().clean()
         self.check_up_to_date(data)
         if all(data.get(f) == getattr(self.current, f) for f in CORRECTABLE_FIELDS):
             raise forms.ValidationError("Nothing was changed.")
+        self.check_loan(data)
         return data
+
+    def check_loan(self, data):
+        """Corrects something that was also changed on the loan: asks which value the loan keeps."""
+        clashing = []
+        for loan_field, field in self.loan_edits.items():
+            name = field.removesuffix("_id")
+            if name not in data:  # typed wrong: the form shows that first
+                continue
+            typed = data[name].pk if isinstance(data[name], models.Model) else data[name]
+            if typed != getattr(self.current, field):
+                clashing.append((loan_field, name))
+        if clashing and not data.get("loan"):
+            what = "; ".join(
+                f"{PlannedTransaction._meta.get_field(lf.removesuffix('_id')).verbose_name.removesuffix(' (zł)')}: "
+                f"the loan says {show(getattr(self.loan, lf.removesuffix('_id')))}, "
+                f"the correction {show(data[name])}" for lf, name in clashing)
+            self.add_error("loan", f"This corrects what was also changed on the loan – {what}. "
+                                   "Choose whether the loan follows the correction.")
+        self.instance.keep_loan = [lf for lf, _ in clashing] if data.get("loan") == "keep" else ()
 
 
 class CancelForm(UpToDateMixin, forms.ModelForm):

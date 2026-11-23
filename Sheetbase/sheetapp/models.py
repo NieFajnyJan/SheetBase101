@@ -283,6 +283,10 @@ class TransactionCorrection(models.Model):
                 raise ValidationError("This payment pays debts between members, so its amount, “paid by” and "
                                       "“paid to” can't be changed. Cancel it and add it again instead.")
 
+    # Loan fields (see payments.LOAN_COPIES) that keep their own value although this correction changes
+    # what they were copied from: chosen on the correction form when the loan was changed separately.
+    keep_loan = ()
+
     def changes_money(self):
         current = self.original.current
         return any(getattr(self, f) != getattr(current, f) for f in MONEY_FIELDS)
@@ -294,9 +298,10 @@ class TransactionCorrection(models.Model):
             # Only when something the loan copies changed, so a date fix keeps edits made to the loan itself.
             # A loan already paid back is history: a description fix leaves it as it was
             # (money changes to it are refused in clean()).
+            previous = self.original.current
             correcting_loan = not self.cancelled and self.original.is_loan() and (
                 self.changes_money()
-                or (self.description != self.original.current.description
+                or (self.description != previous.description
                     and not self.original.leftovers.settled().exists()))
             super().save(*args, **kwargs)
             if self.cancelled:
@@ -308,7 +313,7 @@ class TransactionCorrection(models.Model):
             elif correcting_loan:
                 from .payments import correct_loan
 
-                correct_loan(self.original, self)
+                correct_loan(self.original, self, previous, keep=self.keep_loan)
 
     def delete(self, *args, **kwargs):
         raise ValueError("A correction can't be deleted.")
