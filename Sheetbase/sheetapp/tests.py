@@ -520,6 +520,77 @@ class ShopUserTests(TestCase):
         self.assertEqual(Transaction.objects.count(), 2)
 
 
+class BetweenShopsTests(TestCase):
+    """A done transaction has a member on at least one side: between two shops it's neither a purchase
+    nor a return, and no summary could count it."""
+
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.other_shop = User.objects.create(username="shop-ikea", email="shop-ikea@sheetbase.invalid",
+                                              first_name="Ikea", is_shop=True)
+        self.client.force_login(self.jan)
+
+    def old_one(self, amount="11.00"):
+        """One recorded before this was refused (saved without the checks)."""
+        return Transaction.objects.create(amount=Decimal(amount), payer=self.shop, recipient=self.other_shop,
+                                          description="Przelew", date=today(), created_by=self.jan)
+
+    def test_refused_when_adding(self):
+        page = self.client.post(reverse("transactions"), {
+            "amount": "11.00", "payer": self.shop.pk, "recipient": self.other_shop.pk, "description": "Przelew",
+            "date": today().strftime("%d/%m/%y")})
+        self.assertContains(page, "One side has to be a member")
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_refused_in_the_admin_too(self):
+        t = Transaction(amount=Decimal("1.00"), payer=self.shop, recipient=self.other_shop, description="x",
+                        created_by=self.jan)
+        with self.assertRaises(ValidationError):
+            t.full_clean()
+
+    def test_refused_when_correcting(self):
+        t = Transaction.objects.create(amount=Decimal("11.00"), payer=self.jan, recipient=self.shop,
+                                       description="Kawa", date=today(), created_by=self.jan)
+        page = self.client.post(reverse("correct_transaction", args=[t.pk]), {
+            "amount": "11.00", "payer": self.shop.pk, "recipient": self.other_shop.pk, "description": "Kawa",
+            "date": today().strftime("%d/%m/%y"), "reason": "x"})
+        self.assertContains(page, "One side has to be a member")
+        self.assertFalse(TransactionCorrection.objects.exists())
+
+    def test_an_old_one_can_be_corrected_into_a_purchase_or_cancelled(self):
+        t = self.old_one()
+        url = reverse("correct_transaction", args=[t.pk])
+        fix = {"amount": "11.00", "recipient": self.other_shop.pk, "description": "Przelew",
+               "date": today().strftime("%d/%m/%y"), "reason": "it was me who paid"}
+        self.assertContains(self.client.post(url, {**fix, "payer": self.shop.pk, "description": "Inny"}),
+                            "One side has to be a member")  # still between shops: not even a description fix
+        self.assertRedirects(self.client.post(url, {**fix, "payer": self.jan.pk}), reverse("transactions"))
+        other = self.old_one()
+        self.assertRedirects(self.client.post(reverse("cancel_transaction", args=[other.pk]), {"reason": "mistake"}),
+                             reverse("transactions"))
+        self.assertTrue(Transaction.objects.get(pk=other.pk).is_cancelled)
+
+    def test_an_old_one_is_shown_in_the_summary_and_marked_in_the_history(self):
+        self.old_one("11.00")
+        summary = self.client.get(reverse("summary"))
+        self.assertEqual(summary.context["all_time"].between_shops, Decimal("11.00"))
+        self.assertEqual(summary.context["summaries"][0].between_shops, Decimal("11.00"))
+        self.assertContains(summary, "was paid between two shops", count=2)  # all time and this year
+        self.assertContains(self.client.get(reverse("transactions")), "Between two shops:", count=1)
+
+    def test_nothing_shown_without_one(self):
+        Transaction.objects.create(amount=Decimal("11.00"), payer=self.jan, recipient=self.shop,
+                                   description="Kawa", date=today(), created_by=self.jan)
+        self.assertNotContains(self.client.get(reverse("summary")), "between two shops")
+        self.assertNotContains(self.client.get(reverse("transactions")), "Between two shops")
+
+    def test_the_form_says_which_combinations_work(self):
+        page = self.client.get(reverse("transactions"))
+        self.assertContains(page, "A member – or the shop, when it pays money back (a return).")
+        self.assertContains(page, "The shop, for a purchase – or the member paid.")
+
+
 class PayerIsNotRecipientTests(TestCase):
     def setUp(self):
         self.ola = User.objects.create_user("ola", "ola@example.com")

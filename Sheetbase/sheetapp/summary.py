@@ -52,6 +52,8 @@ class Summary:
     paid: Decimal = ZERO
     received: Decimal = ZERO
     total: Decimal = ZERO  # every transaction in the period – equals the history with the same filter
+    # Paid between two shops, recorded before that was refused: neither a purchase nor a return, so in no row.
+    between_shops: Decimal = ZERO
 
     @property
     def total_spent(self):
@@ -93,6 +95,8 @@ def summarise(transactions, year=None, count_months=False):
         elif payer in members and recipient in members:
             members[payer].paid += amount
             members[recipient].received += amount
+        elif payer in shops and recipient in shops:
+            summary.between_shops += amount
         for pk in (payer, recipient):
             if pk in members and (members[pk].first_date is None or pair["first"] < members[pk].first_date):
                 members[pk].first_date = pair["first"]

@@ -42,6 +42,15 @@ def needs_matching(payer, recipient):
     return not (payer.is_shop or recipient.is_shop)
 
 
+def check_parties(transaction):
+    """A done transaction (or a correction of one) is a purchase (member → shop), a return (shop → member)
+    or a payment between members. Between two shops it would be none of those, and no summary would count it."""
+    if transaction.payer_id and transaction.recipient_id and transaction.payer.is_shop and transaction.recipient.is_shop:
+        raise ValidationError({"recipient": "One side has to be a member: a purchase is paid by a member to a shop, "
+                                            "a return by a shop to a member. A payment between two shops can't "
+                                            "be recorded."})
+
+
 class AlreadyAdded(Exception):
     """This was saved already: the same form was sent twice (e.g. Add or Confirm clicked twice).
     `record` is what the first one added, when known."""
@@ -155,6 +164,9 @@ class Transaction(models.Model):
     def __str__(self):
         return f"{self.date:%d/%m/%y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
 
+    def clean(self):
+        check_parties(self)
+
     # A done transaction is final: it can be added, never edited or deleted.
     def save(self, *args, **kwargs):
         if not self._state.adding:
@@ -264,6 +276,8 @@ class TransactionCorrection(models.Model):
             check_can_undo(self.original)
             check_can_cancel_shares(self.original)
         elif self.payer_id and self.recipient_id:
+            # Not when cancelling: that's how one between two shops, recorded before this check, goes away.
+            check_parties(self)
             current = self.original.current
             if self.changes_money() and self.original.split_shares.exists():
                 raise ValidationError("This purchase was split between people, so its amount, “paid by” and "

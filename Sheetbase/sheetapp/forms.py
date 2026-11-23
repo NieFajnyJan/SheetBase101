@@ -40,6 +40,9 @@ class TransactionForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["date"].input_formats = DATE_FORMATS
+        # Which combinations make sense, next to the two lists (one side is always a member).
+        self.fields["payer"].help_text = "A member – or the shop, when it pays money back (a return)."
+        self.fields["recipient"].help_text = "The shop, for a purchase – or the member paid."
 
 
 class UpToDateMixin:
@@ -269,6 +272,7 @@ class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
             # Disabled: whatever the page sends for these is ignored, the values below are used.
             for name, who in (("payer", paying.debtor), ("recipient", paying.creditor)):
                 self.fields[name].disabled = True
+                self.fields[name].help_text = ""  # fixed: the page says so above the form
                 self.initial[name] = who.pk
             self.fields["split"].disabled = True
             self.initial["split"] = False

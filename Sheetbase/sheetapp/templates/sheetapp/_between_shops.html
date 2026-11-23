@@ -1,0 +1,6 @@
+{% load money %}
+{# Under a period's totals (s = its summary): money paid between two shops, recorded before that was refused. #}
+{% if s.between_shops %}
+  <p class="totals"><strong>{{ s.between_shops|zl }}</strong> of that was paid between two shops – neither a purchase
+    nor a return, so it's in no row above. It's marked in the history: correct who paid whom, or cancel it.</p>
+{% endif %}
