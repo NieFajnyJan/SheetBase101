@@ -1338,6 +1338,32 @@ class PayingDebtsTests(TestCase):
         self.assertContains(self.client.post(url, {**fix, "amount": "60.00"}), "Cancel that later payment first")
         self.assertFalse(pay.corrections.exists())
 
+    def test_description_of_a_paid_back_loan_can_still_be_corrected(self):
+        pay = self.pay("50.00")  # jan now owes ola 50
+        self.client.force_login(self.jan)
+        self.pay("50.00", payer=self.jan, recipient=self.ola)  # ...and pays it back
+        self.client.force_login(self.ola)
+        url = reverse("correct_transaction", args=[pay.pk])
+        fix = {**self.data("50.00"), "description": "Pożyczka na obiad", "reason": "typo"}
+        self.assertRedirects(self.client.post(url, fix), self.url)
+        self.assertEqual(Transaction.objects.get(pk=pay.pk).current.description, "Pożyczka na obiad")
+        loan = self.leftover(pay)  # paid back, so it's history and stays as it was
+        self.assertTrue(loan.is_settled)
+        self.assertEqual(loan.description, "Zwrot")
+
+    def test_correction_explains_when_the_loan_was_paid_back_meanwhile(self):
+        pay = self.pay("50.00")
+        url = reverse("correct_transaction", args=[pay.pk])
+        self.client.force_login(self.jan)
+        self.pay("50.00", payer=self.jan, recipient=self.ola)
+        self.client.force_login(self.ola)
+        # Skip the form's check, as if the loan was paid back between checking the form and saving it.
+        with mock.patch.object(TransactionCorrection, "clean"):
+            page = self.client.post(url, {**self.data("50.00"), "amount": "60.00", "reason": "typo"})
+        self.assertContains(page, "already been paid back")
+        self.assertFalse(pay.corrections.exists())
+        self.assertEqual(self.leftover(pay).amount, Decimal("50.00"))
+
     def test_purchase_cant_be_corrected_into_a_payment_between_members(self):
         d = self.debt("90.00")
         self.client.post(self.url, self.data("90.00", recipient=self.shop))
