@@ -1,3 +1,4 @@
+import json
 import uuid
 from decimal import Decimal
 
@@ -319,6 +320,29 @@ class TransactionCorrection(models.Model):
         raise ValueError("A correction can't be deleted.")
 
 
+class GroupChanged(Exception):
+    """The rows a delete would remove aren't the ones the user was shown any more."""
+
+
+def _shown(row):
+    return [row.pk, row.debtor_id, row.creditor_id, str(row.amount), row.description]
+
+
+def rows_signature(rows):
+    """What a Delete page shows of these planned transactions – which ones, who owes whom, how much,
+    what for – sent with Delete, so it deletes exactly what was shown."""
+    return json.dumps(sorted(_shown(r) for r in rows), ensure_ascii=False, separators=(",", ":"))
+
+
+def changed_rows(rows, signature):
+    """Of these rows, the ones that differ from the rows with `signature` or weren't among them."""
+    try:
+        before = {entry[0]: entry for entry in json.loads(signature)}
+    except (ValueError, TypeError, IndexError, KeyError):
+        return {r.pk for r in rows}
+    return {r.pk for r in rows if before.get(r.pk) != _shown(r)}
+
+
 class PlannedTransactionQuerySet(AuditedQuerySet):
     def open(self):
         """Debts that still count. Use this everywhere debts are added up (balances, who owes whom)."""
@@ -336,11 +360,15 @@ class PlannedTransactionQuerySet(AuditedQuerySet):
         """Puts these rows into one new group (taking them out of any group they were in)."""
         return self.update(group=uuid.uuid4())
 
-    def delete_with_groups(self):
+    def delete_with_groups(self, expected=None):
         """Deletes these and everyone else's rows in their groups – all or nothing.
-        Refused when anyone in a group has already paid (settled debts are never deleted)."""
+        Refused when anyone in a group has already paid (settled debts are never deleted).
+        `expected`: the rows_signature() of the rows the user was shown; when the rows are no longer
+        exactly those (one was added to the group, changed or removed), raises GroupChanged instead."""
         with db_transaction.atomic():
             rows = self.with_groups().select_for_update()
+            if expected is not None and rows_signature(rows) != expected:
+                raise GroupChanged
             paid = rows.settled().select_related("debtor").first()
             if paid:
                 raise ValidationError(f"{paid.debtor} already paid “{paid.description}”, so it can't be deleted.")

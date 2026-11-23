@@ -17,6 +17,9 @@
   .leftover .muted { display: block; }
   .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
   .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
+  /* What changed since Confirm was clicked: in words as well as colour. */
+  .changed { background: #fff4e0; }
+  .changed-note { display: block; font-size: .85rem; font-weight: 600; color: #7a4100; }
 </style>
 {% endblock %}
 
@@ -38,7 +41,7 @@
       {% endif %}
       <ul class="covers">
         {% for debt, ticked, status in plan.rows %}
-          <li><label>
+          <li{% if debt.pk in changed_debts %} class="changed"{% endif %}><label>
             {% if debt.pk == paying.pk %}
               {# The debt being marked paid: always ticked. A disabled box isn't sent, so the hidden one is. #}
               <input type="checkbox" checked disabled>
@@ -51,6 +54,7 @@
               {% elif status == "partly" %}<span class="status partly">paid, but {{ plan.leftover.amount|zl }} of it stays owed</span>
               {% elif status == "ran_out" %}<span class="status ran_out">not paid – the money ran out</span>
               {% else %}<span class="status">&nbsp;</span>{% endif %}
+              {% if debt.pk in changed_debts %}<span class="changed-note">Changed – check it</span>{% endif %}
             </span>
             <span class="num">{{ debt.amount|zl }}</span>
           </label></li>
@@ -62,10 +66,12 @@
 
     {% with left=plan.leftover %}
       {% if left %}
-        <p class="leftover">Leftover: <strong>{{ left.debtor }} owes {{ left.creditor }} {{ left.amount|zl }}</strong>
-          <span class="muted">{{ left.description }}</span></p>
+        <p class="leftover{% if leftover_changed %} changed{% endif %}">Leftover: <strong>{{ left.debtor }} owes {{ left.creditor }} {{ left.amount|zl }}</strong>
+          <span class="muted">{{ left.description }}</span>
+          {% if leftover_changed %}<span class="changed-note">Changed – check it</span>{% endif %}</p>
       {% else %}
-        <p class="leftover">No leftover<span class="muted">The debts are paid exactly.</span></p>
+        <p class="leftover{% if leftover_changed %} changed{% endif %}">No leftover<span class="muted">The debts are paid exactly.</span>
+          {% if leftover_changed %}<span class="changed-note">Changed – check it</span>{% endif %}</p>
       {% endif %}
     {% endwith %}
 

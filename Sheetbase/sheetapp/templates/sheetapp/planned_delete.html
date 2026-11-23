@@ -3,9 +3,19 @@
 
 {% block title %}Delete planned transaction · SheetBase{% endblock %}
 
+{% block extra_head %}
+<style>
+  /* What changed since the page was opened: in words as well as colour. */
+  .changed { background: #fff4e0; }
+  .changed-note { color: #7a4100; }
+</style>
+{% endblock %}
+
 {% block content %}
   <form class="card" method="post">
     {% csrf_token %}
+    {# What's listed below, so Delete deletes exactly that – not rows added or changed since. #}
+    <input type="hidden" name="rows" value="{{ signature }}">
     <h2>Delete planned transaction</h2>
     <p><strong>Only delete a debt that was entered by mistake.</strong>
       If it was paid, add the payment on the <a href="{% url 'transactions' %}">Transactions</a> page instead –
@@ -13,7 +23,7 @@
 
     {% if rows|length > 1 %}<p>It's part of a group, so all of these are deleted:</p>{% else %}<p>This is deleted:</p>{% endif %}
     <ul>
-      {% for r in rows %}<li>{{ r.debtor }} owes {{ r.creditor }} {{ r.amount|zl }} – {{ r.description }}</li>{% endfor %}
+      {% for r in rows %}<li{% if r.pk in changed %} class="changed"{% endif %}>{{ r.debtor }} owes {{ r.creditor }} {{ r.amount|zl }} – {{ r.description }}{% if r.pk in changed %} <strong class="changed-note">– changed or added since, check it</strong>{% endif %}</li>{% endfor %}
     </ul>
 
     {% if problems %}

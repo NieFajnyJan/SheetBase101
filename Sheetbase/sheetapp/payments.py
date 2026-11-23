@@ -3,6 +3,7 @@ paid – oldest first unless the payer ticks others – and whatever doesn't mat
 exactly becomes a new planned transaction (a leftover).
 Purchases and returns (anything to or from a shop) never touch debts."""
 
+import json
 import uuid
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -39,11 +40,33 @@ class PaymentPlan:
     covered: list[PlannedTransaction] = field(default_factory=list)
     leftover: Leftover | None = None
 
-    def signature(self):
-        """Identifies the plan, so Confirm can check the debts haven't changed since the screen was shown."""
+    def reviewed(self):
+        """What Confirm commits to, as the confirmation screen shows it: each debt paid – which one, how
+        much and what for – and the leftover."""
         left = self.leftover
-        return ",".join(str(d.pk) for d in self.covered) + (
-            f"|{left.debtor.pk}>{left.creditor.pk}:{left.amount}" if left else "|")
+        return {
+            "paid": [[d.pk, str(d.amount), d.description, d.tag] for d in self.covered],
+            "leftover": [left.debtor.pk, left.creditor.pk, str(left.amount), left.description] if left else None,
+        }
+
+    def signature(self):
+        """The plan as reviewed, sent with Confirm: saving checks the plan still says exactly this,
+        so a debt that was changed, added or removed in the meantime is shown again first."""
+        return json.dumps(self.reviewed(), ensure_ascii=False, separators=(",", ":"))
+
+    def changes_since(self, signature):
+        """Compared with the plan that had `signature`: the debts paid differently now (newly paid, no longer
+        paid, or with another amount or description), and whether the leftover differs."""
+        try:
+            before = json.loads(signature)
+            paid_before = {row[0]: row for row in before["paid"]}
+            leftover_before = before["leftover"]
+        except (ValueError, KeyError, TypeError, IndexError):
+            return {d.pk for d in self.debts}, True  # can't tell: check it all
+        now = self.reviewed()
+        paid_now = {row[0]: row for row in now["paid"]}
+        debts = {pk for pk in paid_before.keys() | paid_now.keys() if paid_before.get(pk) != paid_now.get(pk)}
+        return debts, leftover_before != now["leftover"]
 
     def rows(self):
         """For the confirmation screen: each open debt, whether it's ticked, and what happens to it:
