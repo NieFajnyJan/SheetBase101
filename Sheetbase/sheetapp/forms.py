@@ -1,5 +1,6 @@
 import json
 import uuid
+from datetime import date
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -8,7 +9,14 @@ from django.utils import timezone
 from django.utils.html import format_html
 from django.utils.text import slugify
 
-from .models import CORRECTABLE_FIELDS, MAX_YEARS_BACK, PlannedTransaction, Transaction, TransactionCorrection, User
+from .models import (
+    CORRECTABLE_FIELDS,
+    MAX_YEARS_BACK,
+    PlannedTransaction,
+    Transaction,
+    TransactionCorrection,
+    User,
+)
 from .payments import loan_edits
 from .splits import GROSZ, plan_split
 from .templatetags.money import show
@@ -32,7 +40,7 @@ class AmountField(forms.DecimalField):
 class TransactionForm(forms.ModelForm):
     class Meta:
         model = Transaction
-        fields = ["amount", "payer", "recipient", "description", "date"]
+        fields = CORRECTABLE_FIELDS
         field_classes = {"amount": AmountField}
         # A text box, not type=number: number boxes reject a comma in some browsers.
         widgets = {"date": DATE_WIDGET, "amount": forms.TextInput(attrs={"inputmode": "decimal"})}
@@ -158,11 +166,12 @@ class CancelForm(UpToDateMixin, forms.ModelForm):
 
     def __init__(self, *args, original, **kwargs):
         super().__init__(*args, **kwargs)
+        current = original.current
         for f in CORRECTABLE_FIELDS:
-            setattr(self.instance, f, getattr(original.current, f))
+            setattr(self.instance, f, getattr(current, f))
         self.instance.original = original
         self.instance.cancelled = True
-        self.add_shown_field(original.current, CORRECTABLE_FIELDS)
+        self.add_shown_field(current, CORRECTABLE_FIELDS)
 
     def clean(self):
         data = super().clean()
@@ -328,7 +337,7 @@ class AddPlannedForm(OnceMixin, SplitMixin, PlannedTransactionForm):
         return data
 
 
-MONTHS = [(m, timezone.datetime(2000, m, 1).strftime("%B")) for m in range(1, 13)]
+MONTHS = [(m, date(2000, m, 1).strftime("%B")) for m in range(1, 13)]
 
 
 class HistoryFilterForm(forms.Form):
@@ -374,7 +383,7 @@ class ShopForm(forms.Form):
     name = forms.CharField(label="shop name", max_length=100)
 
     def clean_name(self):
-        name = self.cleaned_data["name"].strip()
+        name = self.cleaned_data["name"]
         self.username = "shop-" + slugify(name, allow_unicode=True)
         if self.username == "shop-":
             raise forms.ValidationError("Enter a name with letters or digits.")

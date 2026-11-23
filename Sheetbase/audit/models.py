@@ -1,6 +1,8 @@
 from django.db import models
 from django.utils import timezone
 
+from . import display
+
 
 class Entry(models.Model):
     """One thing that happened: who, when, from where, and what changed (the record before and after).
@@ -38,9 +40,7 @@ class Entry(models.Model):
 
     def lines(self):
         """The entry as text anyone can read: a headline, then what changed."""
-        from .display import lines
-
-        return lines(self)
+        return display.lines(self)
 
     def changes(self):
         """{field: (before, after)} for the fields that differ."""

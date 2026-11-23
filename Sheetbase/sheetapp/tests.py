@@ -1,10 +1,40 @@
-from django.db import models
-from django.test import TestCase
-from django.urls import reverse
+import importlib
+import uuid
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from unittest import mock
+from urllib.parse import parse_qs, urlparse
+from zoneinfo import ZoneInfo
 
-from .models import User
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, connection, models, transaction as db_transaction
+from django.db.migrations.executor import MigrationExecutor
+from django.db.models import ProtectedError
+from django.test import TestCase, override_settings
+from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
+from django.utils import timezone
+
+from audit.models import Entry
+
+from .models import (
+    SHOP_USERNAME,
+    AlreadyAdded,
+    PlannedTransaction,
+    Transaction,
+    TransactionCorrection,
+    User,
+    save_once,
+    validate_transaction_date,
+)
+from .payments import plan_payment, record_payment
+from .splits import divide, plan_split
+from .summary import complete_months
+from .templatetags.money import zl
+
 
 PASSWORD = "Sup3r-secret-pw!"
+NBSP = "\u00a0"  # the zł filter never lets an amount wrap
 
 
 class NoLocalAccountsTests(TestCase):
@@ -37,11 +67,6 @@ class NoLocalAccountsTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Google login
-from unittest import mock
-from urllib.parse import parse_qs, urlparse
-
-from django.test import override_settings
-
 GOOGLE_CONFIGURED = {
     "google": {
         "SCOPE": ["profile", "email"],
@@ -183,13 +208,6 @@ class DexLoginTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Transactions
-from decimal import Decimal
-
-from django.core.exceptions import ValidationError
-
-from .models import SHOP_USERNAME, Transaction
-
-
 class TransactionModelTests(TestCase):
     def setUp(self):
         self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
@@ -227,16 +245,9 @@ class TransactionModelTests(TestCase):
             t.full_clean()
 
     def test_date_defaults_to_today(self):
-        from django.utils import timezone
-
         self.assertEqual(self.make(Decimal("1.00")).date, timezone.localdate())
 
     def test_date_range(self):
-        from datetime import date
-        from unittest import mock
-
-        from .models import validate_transaction_date
-
         with mock.patch("django.utils.timezone.localdate", return_value=date(2026, 11, 5)):
             for ok in (date(2026, 11, 5), date(2024, 11, 5)):
                 validate_transaction_date(ok)  # no error
@@ -249,10 +260,6 @@ class TransactionModelTests(TestCase):
                 validate_transaction_date(date(2026, 2, 27))
 
     def test_form_rejects_future_date(self):
-        from datetime import timedelta
-
-        from django.utils import timezone
-
         boss = User.objects.create_superuser("boss", "boss@example.com", "x")
         self.client.force_login(boss)
         tomorrow = timezone.localdate() + timedelta(days=1)
@@ -263,8 +270,6 @@ class TransactionModelTests(TestCase):
         self.assertFalse(Transaction.objects.exists())
 
     def test_payer_with_transactions_cannot_be_deleted(self):
-        from django.db.models import ProtectedError
-
         self.make(Decimal("1.00"))
         with self.assertRaises(ProtectedError):
             self.ola.delete()
@@ -288,8 +293,6 @@ class TransactionAdminTests(TestCase):
 
 # --------------------------------------------------------------------------- Pages
 def today():
-    from django.utils import timezone
-
     return timezone.localdate()
 
 
@@ -383,15 +386,10 @@ class TransactionListTests(TestCase):
         self.assertContains(response, "1\xa0234,80\xa0zł")  # shown as 1 234,80 zł
 
     def test_dates_shown_as_dd_mm_yy(self):
-        from datetime import date
-
         self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
         self.assertContains(self.client.get(self.url), date(today().year, 1, 5).strftime("05/01/%y"))
 
     def test_shows_date_paid_and_date_added(self):
-        from datetime import date, datetime
-        from zoneinfo import ZoneInfo
-
         t = self.make("1.00", self.jan, self.shop, date(today().year, 1, 5))
         # created_at is set automatically; pin it to check the added date is shown in Warsaw time.
         Transaction.objects.filter(pk=t.pk).update(
@@ -402,16 +400,12 @@ class TransactionListTests(TestCase):
         self.assertContains(response, date(today().year, 2, 4).strftime("04/02/%y"))  # 23:30 UTC = 00:30 in Warsaw
 
     def test_newest_first(self):
-        from datetime import timedelta
-
         self.make("1.00", self.jan, self.shop, today() - timedelta(days=3))
         self.make("2.00", self.jan, self.shop)
         dates = [t.date for t in self.client.get(self.url).context["transactions"]]
         self.assertEqual(dates, sorted(dates, reverse=True))
 
     def test_filters_change_list_and_total(self):
-        from datetime import date
-
         self.make("1.00", self.jan, self.shop)
         self.make("2.00", self.ola, self.shop)
         self.make("4.00", self.ola, self.jan)
@@ -433,8 +427,6 @@ class TransactionListTests(TestCase):
         self.assertContains(self.client.get(self.url), "No transactions yet")
 
     def test_zl_format(self):
-        from .templatetags.money import zl
-
         for value, text in (("0", "0,00"), ("12.5", "12,50"), ("1234.5", "1\xa0234,50"),
                             ("1234567.89", "1\xa0234\xa0567,89")):
             self.assertEqual(zl(Decimal(value)), f"{text}\xa0zł")
@@ -604,8 +596,6 @@ class PayerIsNotRecipientTests(TestCase):
             self.build().full_clean()
 
     def test_rejected_by_database(self):
-        from django.db import IntegrityError
-
         with self.assertRaises(IntegrityError):
             self.build().save()
 
@@ -629,9 +619,6 @@ class PayerIsNotRecipientTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Corrections
-from .models import TransactionCorrection
-
-
 class CorrectionTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com")  # added the transaction
@@ -673,8 +660,6 @@ class CorrectionTests(TestCase):
         self.assertEqual(self.total(), Decimal("13.00"))
 
     def test_any_field_can_change_and_filters_follow(self):
-        from datetime import date
-
         last_year = date(today().year - 1, 6, 15)
         other_shop = User.objects.create(username="shop-zabka", email="zabka@sheetbase.invalid", is_shop=True)
         self.correct(payer=self.ola.pk, recipient=other_shop.pk, description="Herbata",
@@ -703,8 +688,6 @@ class CorrectionTests(TestCase):
         self.assertFalse(TransactionCorrection.objects.exists())
 
     def test_same_validation_as_add_form(self):
-        from datetime import timedelta
-
         too_old = today().replace(year=today().year - 3)
         for fields in ({"amount": "0"}, {"amount": "1.005"}, {"recipient": self.jan.pk},
                        {"date": too_old.strftime("%d/%m/%y")},
@@ -840,8 +823,6 @@ class CorrectionTests(TestCase):
 # --------------------------------------------------------------------------- Yearly summary
 class YearlySummaryTests(TestCase):
     def setUp(self):
-        from datetime import date
-
         self.jan = User.objects.create_user("jan", "jan@example.com")
         self.ola = User.objects.create_user("ola", "ola@example.com")
         self.ewa = User.objects.create_user("ewa", "ewa@example.com")  # does nothing all year
@@ -925,8 +906,6 @@ class YearlySummaryTests(TestCase):
             self.assertEqual(s.total, history, year)
 
     def test_uses_corrected_values_and_skips_cancelled(self):
-        from .models import TransactionCorrection
-
         fixed = self.make("124.90", self.jan, self.shop, self.d(self.this_year))
         TransactionCorrection.objects.create(original=fixed, amount=Decimal("12.49"), payer=self.ola,
                                              recipient=self.shop, description="x", date=self.d(self.this_year - 1),
@@ -941,11 +920,6 @@ class YearlySummaryTests(TestCase):
         self.assertEqual(self.row(s[self.this_year - 1], self.jan).purchases, 0)
 
     def test_all_time_per_member_from_their_first_transaction(self):
-        from datetime import date
-        from unittest import mock
-
-        from .models import TransactionCorrection
-
         self.make("1200.00", self.jan, self.shop, date(2030, 1, 20))
         self.make("100.00", self.jan, self.shop, date(2029, 12, 5))  # jan's first: December 2029
         self.make("30.00", self.ola, self.shop, date(2030, 9, 15))  # ola's first: September 2030
@@ -982,10 +956,6 @@ class YearlySummaryTests(TestCase):
         self.assertEqual(s.total, self.client.get(reverse("transactions")).context["total"])
 
     def test_complete_months_like_excel_datedif(self):
-        from datetime import date
-
-        from .summary import complete_months
-
         for start, end, months in ((date(2024, 10, 7), date(2024, 11, 6), 0), (date(2024, 10, 7), date(2024, 11, 7), 1),
                                    (date(2024, 1, 31), date(2024, 2, 29), 0), (date(2024, 10, 7), date(2026, 11, 9), 25),
                                    (date(2024, 10, 7), date(2024, 10, 7), 0)):
@@ -998,9 +968,6 @@ class YearlySummaryTests(TestCase):
         self.assertContains(response, "no transactions yet")
 
     def test_year_boundary(self):
-        from datetime import date
-        from unittest import mock
-
         self.make("1.00", self.jan, self.shop, date(2030, 12, 31))
         self.make("2.00", self.jan, self.shop, date(2031, 1, 1))
         with mock.patch("django.utils.timezone.localdate", return_value=date(2030, 12, 31)):
@@ -1012,13 +979,6 @@ class YearlySummaryTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Planned transactions
-from django.db import IntegrityError, transaction as db_transaction
-from django.db.models import ProtectedError
-from django.utils import timezone
-
-from .models import PlannedTransaction
-
-
 class PlannedTransactionTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
@@ -1175,12 +1135,6 @@ class PlannedTransactionAdminTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Paying debts
-import uuid
-
-from .models import AlreadyAdded, save_once
-from .payments import plan_payment
-
-
 class PayingDebtsTests(TestCase):
     """A payment between members settles the payer's debts to the person paid, oldest first."""
 
@@ -1525,8 +1479,6 @@ class PayingDebtsTests(TestCase):
         pay = self.pay("100.00")
         PlannedTransaction.objects.filter(pk=self.leftover(pay).pk).update(description="Na taksówkę")
         url = reverse("correct_transaction", args=[pay.pk])
-        from datetime import timedelta
-
         yesterday = (today() - timedelta(days=1)).strftime("%d/%m/%y")
         self.assertRedirects(self.client.post(url, {**self.data("100.00"), "date": yesterday, "reason": "x"}), self.url)
         self.assertEqual(self.leftover(pay).description, "Na taksówkę")
@@ -1579,12 +1531,8 @@ class PayingDebtsTests(TestCase):
         self.assertFalse(self.refresh(d)[0].is_settled)
 
     def test_cancel_race_shows_message(self):
-        from unittest import mock
-
-        from django.core.exceptions import ValidationError as DjangoValidationError
-
         pay = self.pay("50.00")
-        with mock.patch("sheetapp.payments.check_can_undo", side_effect=[None, DjangoValidationError("paid meanwhile")]):
+        with mock.patch("sheetapp.payments.check_can_undo", side_effect=[None, ValidationError("paid meanwhile")]):
             page = self.cancel(pay)
         self.assertContains(page, "paid meanwhile")
         self.assertFalse(pay.corrections.exists())
@@ -1619,13 +1567,6 @@ class GroupRestsMigrationTests(TestCase):
     databases = {"default", "audit"}
 
     def test_rests_added_before_join_their_group(self):
-        import importlib
-
-        from django.db import connection
-        from django.db.migrations.executor import MigrationExecutor
-
-        from audit.models import Entry
-
         # Models as the migration sees them: saving them doesn't reach the audit log's hooks.
         apps = MigrationExecutor(connection).loader.project_state(("sheetapp", "0011_submission")).apps
 
@@ -2182,14 +2123,6 @@ class MarkPaidTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Splitting a purchase between people
-import uuid
-
-from .payments import record_payment
-from .splits import divide
-
-NBSP = "\u00a0"  # the zł filter never lets an amount wrap
-
-
 class DivideTests(TestCase):
     def test_shares_add_up_exactly_and_differ_by_at_most_a_grosz(self):
         for amount, people in [("10.00", 3), ("1535.39", 5), ("0.05", 5), ("100.00", 4), ("0.07", 3)]:
@@ -2276,8 +2209,6 @@ class SplitTests(TestCase):
         self.assertEqual(self.owed(), {(s.member, self.jan): s.amount for s in plan.owed})
 
     def test_shares_dont_depend_on_the_order_people_are_listed(self):
-        from .splits import plan_split
-
         seed = uuid.uuid4()
         people = [self.jan, self.ola, self.ewa]
         shares = [{s.member: s.amount for s in plan_split(self.jan, Decimal("10.00"), order, "x", seed).shares}
@@ -2393,9 +2324,6 @@ class SplitTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Debts linked to their purchase
-from django.db import connection
-from django.test.utils import CaptureQueriesContext
-
 class PurchaseLinkTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")

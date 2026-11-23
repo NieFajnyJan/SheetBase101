@@ -91,18 +91,6 @@ def _clip(text):
     return text[:DESCRIPTION_MAX]
 
 
-def default_choice(debts, amount):
-    """Which debts a payment is for when nobody picked: oldest first (`debts` come in that order)
-    until the money runs out, the last one perhaps only partly."""
-    chosen, remaining = set(), amount
-    for debt in debts:
-        if remaining <= 0:
-            break
-        chosen.add(debt.pk)
-        remaining -= debt.amount
-    return chosen
-
-
 def plan_payment(payer, recipient, amount, description, chosen=None, lock=False) -> PaymentPlan:
     """Matches a payment of `amount` from payer to recipient against payer's open debts to recipient.
     `chosen`: ids of the debts it's for (others are ignored); None picks them automatically."""
@@ -113,13 +101,16 @@ def plan_payment(payer, recipient, amount, description, chosen=None, lock=False)
     if lock:
         debts = debts.select_for_update()
     plan = PaymentPlan(debts=list(debts))
-    plan.chosen = default_choice(plan.debts, amount) if chosen is None else {d.pk for d in plan.debts if d.pk in chosen}
+    if chosen is not None:
+        plan.chosen = {debt.pk for debt in plan.debts if debt.pk in chosen}
     remaining = amount
     for debt in plan.debts:
-        if debt.pk not in plan.chosen:
-            continue
         if remaining <= 0:
             break
+        if chosen is None:
+            plan.chosen.add(debt.pk)
+        elif debt.pk not in plan.chosen:
+            continue
         plan.covered.append(debt)
         if debt.amount > remaining:
             # Underpaid: this debt is settled anyway and the payer still owes the rest.
@@ -201,7 +192,7 @@ def loan_edits(payment: Transaction):
     {loan field: payment field} for the fields where it no longer says what the payment says.
     (None, {}) when the payment made no loan, or it's been paid back."""
     loan = payment.leftovers.open().select_related("debtor", "creditor").first()
-    if loan is None or not payment.is_loan():
+    if loan is None or payment.settled_debts.exists():
         return None, {}
     current = payment.current
     return loan, {lf: pf for lf, pf in LOAN_COPIES if getattr(loan, lf) != loan_value(current, pf)}

@@ -1,7 +1,8 @@
 """Summaries: per member, what they spent and paid – for one year, or all time.
 Done transactions only, with their corrected values; cancelled ones don't count."""
+
 from dataclasses import dataclass, field
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Max, Min, Sum
 
