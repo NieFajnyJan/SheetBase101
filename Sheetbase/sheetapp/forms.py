@@ -81,6 +81,24 @@ class PlannedTransactionForm(forms.ModelForm):
         widgets = {"amount": forms.TextInput(attrs={"inputmode": "decimal"})}
 
 
+def new_id_field():
+    """A hidden id, new each time the add form is shown: the page gives it a fresh value whenever the
+    form comes back (data-new-id), so only a form sent twice arrives with the same one."""
+    return forms.UUIDField(widget=forms.HiddenInput(attrs={"data-new-id": ""}), initial=uuid.uuid4, required=False)
+
+
+class OnceMixin:
+    """Gives an add form a hidden submission id that is saved with what it adds, so sending the same
+    form twice (Add or Confirm clicked twice, the browser sending it again) adds it once. See save_once()."""
+
+    def add_submission_field(self):
+        self.fields["submission"] = new_id_field()
+
+    def save(self, commit=True):
+        self.instance.submission = self.cleaned_data.get("submission")
+        return super().save(commit)
+
+
 SPLIT_FIELDS = ["split", "participants", "split_amount", "split_seed"]
 
 
@@ -104,7 +122,7 @@ class SplitMixin:
                 "Only part of the purchase is shared? Say you bought 3 chairs for 4606,16 zł, but only one "
                 "of them is for everyone: enter 1535,39 (one chair) here. The purchase is still recorded as "
                 "4606,16 zł, and only 1535,39 zł is split between the people ticked.")
-        self.fields["split_seed"] = forms.UUIDField(widget=forms.HiddenInput, initial=uuid.uuid4, required=False)
+        self.fields["split_seed"] = new_id_field()
 
     def main_fields(self):
         return [f for f in self.visible_fields() if f.name not in SPLIT_FIELDS]
@@ -129,13 +147,14 @@ class SplitMixin:
                           data.get("split_seed") or uuid.uuid4(), tag=data.get("tag", ""))
 
 
-class AddTransactionForm(SplitMixin, TransactionForm):
+class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
     """The add form on the Transactions page. Splitting a purchase: the shares become
     planned transactions owed to whoever paid."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.add_split_fields(split_amount=True)
+        self.add_submission_field()
 
     def split_creditor(self):
         return self.cleaned_data["payer"]
@@ -160,7 +179,7 @@ class AddTransactionForm(SplitMixin, TransactionForm):
         return data
 
 
-class AddPlannedForm(SplitMixin, PlannedTransactionForm):
+class AddPlannedForm(OnceMixin, SplitMixin, PlannedTransactionForm):
     """The add form on the Planned page. When splitting, “owes” is replaced by the people who chip in:
     each gets a planned transaction for their share, owed to “owed to”."""
 
@@ -168,6 +187,7 @@ class AddPlannedForm(SplitMixin, PlannedTransactionForm):
         super().__init__(*args, **kwargs)
         self.fields["debtor"].required = False  # checked in clean(): only needed when not splitting
         self.add_split_fields()
+        self.add_submission_field()
 
     def split_creditor(self):
         return self.cleaned_data["creditor"]

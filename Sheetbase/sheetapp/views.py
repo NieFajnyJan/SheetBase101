@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -9,9 +11,9 @@ from django.views.decorators.http import require_GET
 
 from .forms import (DATE_FORMATS, AddPlannedForm, AddTransactionForm, CancelForm, CorrectionForm, HistoryFilterForm,
                     PlannedTransactionForm, ShopForm)
-from .models import PlannedTransaction, Transaction, TransactionCorrection, needs_matching
+from .models import AlreadyAdded, PlannedTransaction, Transaction, TransactionCorrection, needs_matching, save_once
 from .payments import PlanChanged, plan_payment, record_payment
-from .splits import AlreadyAdded, save_split
+from .splits import save_split
 from .summary import all_time_summary, year_summary
 
 
@@ -56,7 +58,8 @@ def transactions(request):
         return redirect("planned")
     if paying:  # Mark paid: the payment filled in from the debt
         details = {"payer": paying.debtor.pk, "recipient": paying.creditor.pk, "amount": str(paying.amount),
-                   "description": paying.description, "date": timezone.localdate().strftime(DATE_FORMATS[0])}
+                   "description": paying.description, "date": timezone.localdate().strftime(DATE_FORMATS[0]),
+                   "submission": str(uuid.uuid4())}
         if request.method == "GET":  # straight to the confirmation screen; its Back opens the form
             form = AddTransactionForm(details)
             if form.is_valid():
@@ -81,8 +84,12 @@ def transactions(request):
             if form.cleaned_data["split"]:
                 return confirm_split(request, form, purchase=obj)
             if not needs_matching(obj.payer, obj.recipient):  # a purchase or return: no debts involved
-                obj.save()
-                messages.success(request, f"Added: {obj}")
+                try:
+                    save_once(Transaction, obj.submission, obj.save)
+                except AlreadyAdded as e:  # e.g. Add clicked twice
+                    messages.info(request, f"Already added: {e.record}")
+                else:
+                    messages.success(request, f"Added: {obj}")
                 return redirect(request.get_full_path())
             return confirm_payment(request, form, obj, paying)
 
@@ -129,7 +136,12 @@ def confirm_payment(request, form, payment, paying=None):
                                 "add the payment on the Transactions page.")
     elif "confirm" in request.POST:
         try:
-            record_payment(payment, chosen=chosen, expected_signature=request.POST.get("plan", ""))
+            # Checked before the plan: once the first click has paid the debts, the plan differs too.
+            save_once(Transaction, payment.submission, lambda: record_payment(
+                payment, chosen=chosen, expected_signature=request.POST.get("plan", "")))
+        except AlreadyAdded as e:  # e.g. Confirm clicked twice
+            messages.info(request, f"Already added: {e.record}")
+            return redirect("planned" if paying else request.get_full_path())
         except PlanChanged as changed:
             plan = changed.plan
             messages.warning(request, "What this payment covers has changed – please check it again.")
@@ -209,8 +221,12 @@ def planned(request):
             return confirm_split(request, form)
         debt = form.save(commit=False)
         debt.created_by = request.user
-        debt.save()
-        messages.success(request, f"Added: {debt}")
+        try:
+            save_once(PlannedTransaction, debt.submission, debt.save)
+        except AlreadyAdded as e:  # e.g. Add clicked twice
+            messages.info(request, f"Already added: {e.record}")
+        else:
+            messages.success(request, f"Added: {debt}")
         return redirect("planned")
     debts = with_source(PlannedTransaction.objects.open().select_related("debtor", "creditor", "created_by"))
     return render(request, "sheetapp/planned.html", {

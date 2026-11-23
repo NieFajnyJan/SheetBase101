@@ -1064,6 +1064,9 @@ class PlannedTransactionAdminTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Paying debts
+import uuid
+
+from .models import AlreadyAdded, save_once
 from .payments import plan_payment
 
 
@@ -1407,6 +1410,88 @@ class PayingDebtsTests(TestCase):
             "description": "Zwrot", "date": today().isoformat(), "cancelled": "on", "reason": "mistake"})
         self.assertTrue(pay.corrections.get().cancelled)
         self.assertFalse(self.refresh(d)[0].is_settled)
+
+
+class SentTwiceTests(TestCase):
+    """The same add form sent twice (Add or Confirm clicked twice, the browser sending it again) adds it once."""
+
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.client.force_login(self.jan)
+        self.submission = str(uuid.uuid4())
+
+    def transaction(self, **fields):
+        data = {"amount": "12.49", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "Kawa",
+                "date": today().strftime("%d/%m/%y"), "submission": self.submission}
+        return self.client.post(reverse("transactions"), {**data, **fields}, follow=True)
+
+    def confirm_twice(self):
+        """A payment from jan to ola: the confirmation screen, then Confirm clicked twice."""
+        screen = self.transaction(recipient=self.ola.pk)
+        self.assertContains(screen, f'value="{self.submission}"')  # the screen keeps the form's id
+        confirm = {"recipient": self.ola.pk, "confirm": "", "plan": screen.context["plan"].signature()}
+        self.transaction(**confirm)
+        return self.transaction(**confirm)
+
+    def test_purchase(self):
+        self.transaction()
+        page = self.transaction()
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertContains(page, "Already added: ")
+
+    def test_planned_transaction(self):
+        data = {"debtor": self.ola.pk, "creditor": self.jan.pk, "amount": "30,00", "description": "Pizza",
+                "submission": self.submission}
+        self.client.post(reverse("planned"), data)
+        page = self.client.post(reverse("planned"), data, follow=True)
+        self.assertEqual(PlannedTransaction.objects.count(), 1)
+        self.assertContains(page, "Already added: ")
+
+    def test_loan(self):  # jan owes ola nothing, so the payment is a loan: ola owes jan
+        page = self.confirm_twice()
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertEqual(PlannedTransaction.objects.count(), 1)
+        self.assertContains(page, "Already added: ")
+
+    def test_payment_of_a_debt(self):
+        PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("12.49"),
+                                          description="Pizza", created_by=self.ola)
+        page = self.confirm_twice()
+        self.assertEqual(Transaction.objects.count(), 1)
+        self.assertFalse(PlannedTransaction.objects.open().exists())  # paid, and no loan from the second click
+        self.assertContains(page, "Already added: ")
+        self.assertNotContains(page, "has changed")
+
+    def test_each_new_form_gets_a_new_id(self):
+        ids = {self.client.get(reverse(page)).context["form"]["submission"].value()
+               for page in ("transactions", "transactions", "planned")}
+        self.assertEqual(len(ids), 3)
+        page = self.client.get(reverse("transactions"))
+        self.assertContains(page, 'name="submission"')
+        self.assertContains(page, "data-new-id")  # the page renews it when it comes back
+
+    def test_the_database_refuses_the_same_id_twice(self):
+        fields = {"amount": Decimal("1.00"), "payer": self.jan, "recipient": self.shop, "description": "x",
+                  "created_by": self.jan, "submission": self.submission}
+        Transaction.objects.create(**fields)
+        with self.assertRaises(IntegrityError), db_transaction.atomic():
+            Transaction.objects.create(**fields)
+
+    def test_both_arriving_at_once(self):
+        first = Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan, recipient=self.shop,
+                                           description="x", created_by=self.jan, submission=self.submission)
+        second = Transaction(amount=Decimal("1.00"), payer=self.jan, recipient=self.shop, description="x",
+                             created_by=self.jan, submission=self.submission)
+        real = Transaction.objects.filter
+        # The first one isn't there yet when the second checks, only when the database refuses the second.
+        with mock.patch.object(Transaction.objects, "filter",
+                               side_effect=[Transaction.objects.none(), real(submission=self.submission)]):
+            with self.assertRaises(AlreadyAdded) as added:
+                save_once(Transaction, self.submission, second.save)
+        self.assertEqual(added.exception.record, first)
+        self.assertEqual(Transaction.objects.count(), 1)
 
 
 class PlannedGroupTests(TestCase):

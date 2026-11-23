@@ -73,19 +73,24 @@
       boxes.forEach(b => b.addEventListener("change", label));
       all.hidden = boxes.length === 0;
       label();
-
-      // A new id each time the form is shown – also when the browser's Back button brings back the old page
-      // (with the id of a split already added, this one would then not be saved). The confirmation screen
-      // keeps its own id, so a double click on Confirm is still caught. Not crypto.randomUUID: it needs https.
-      const seed = tick.form.querySelector('input[name="split_seed"]');
-      window.addEventListener("pageshow", () => {
-        if (!seed) return;
+    })();
+  </script>
+{% endif %}
+<script>
+  // New ids (the split seed and the submission id) each time the form is shown – also when the browser's
+  // Back button brings back the old page (with the id of something already added, it would then not be saved).
+  // The confirmation screens keep the ids they were given, so a second click on Confirm is still caught.
+  // Not crypto.randomUUID: it needs https.
+  (() => {
+    const form = document.currentScript.closest("form");
+    window.addEventListener("pageshow", () => {
+      form.querySelectorAll("input[data-new-id]").forEach(input => {
         const b = crypto.getRandomValues(new Uint8Array(16));
         b[6] = (b[6] & 0x0f) | 0x40;
         b[8] = (b[8] & 0x3f) | 0x80;
         const h = [...b].map(x => x.toString(16).padStart(2, "0")).join("");
-        seed.value = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+        input.value = `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
       });
-    })();
-  </script>
-{% endif %}
+    });
+  })();
+</script>
