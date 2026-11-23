@@ -70,6 +70,7 @@
     </div>
     <p class="totals">All transactions so far: <strong>{{ s.total|zl }}</strong>
       (<a href="{% url 'transactions' %}">see them in the history</a>)</p>
+    {% include "sheetapp/_between_shops.html" %}
   </section>
   {% endwith %}
 
@@ -125,6 +126,7 @@
       all transactions: <strong>{{ s.total|zl }}</strong>
       (<a href="{% url 'transactions' %}?year={{ s.year }}">see them in the history</a>)
     </p>
+    {% include "sheetapp/_between_shops.html" %}
   </section>
   {% endfor %}
 {% endblock %}
