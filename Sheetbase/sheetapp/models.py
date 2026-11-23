@@ -4,7 +4,7 @@ from decimal import Decimal
 from django.contrib.auth.models import AbstractUser
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator
-from django.db import models, transaction as db_transaction
+from django.db import IntegrityError, models, transaction as db_transaction
 from django.db.models import Case, F, OuterRef, Subquery, Value, When
 from django.db.models.functions import Coalesce
 from django.utils import timezone
@@ -39,6 +39,33 @@ def validate_transaction_date(value):
 def needs_matching(payer, recipient):
     """A payment between two members pays debts; a purchase or return (to or from a shop) never does."""
     return not (payer.is_shop or recipient.is_shop)
+
+
+class AlreadyAdded(Exception):
+    """This was saved already: the same form was sent twice (e.g. Add or Confirm clicked twice).
+    `record` is what the first one added, when known."""
+
+    def __init__(self, record=None):
+        super().__init__("This was already added.")
+        self.record = record
+
+
+def save_once(model, submission, save):
+    """Runs save(), which adds a `model` record from the add form with this submission id, unless
+    that form was sent before: then raises AlreadyAdded and saves nothing. The id is unique in the
+    database, so this holds even when both arrive at the same moment. No id (None): just saves."""
+    def added_before():
+        return submission and model.objects.filter(submission=submission).first()
+
+    try:
+        with db_transaction.atomic():
+            if first := added_before():
+                raise AlreadyAdded(first)
+            return save()
+    except IntegrityError:
+        if first := added_before():
+            raise AlreadyAdded(first) from None
+        raise
 
 
 class User(AbstractUser):
@@ -108,6 +135,8 @@ class Transaction(models.Model):
         User, on_delete=models.PROTECT, related_name="created_transactions", editable=False
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # The add form it came from (a hidden id), so sending that form twice can't add it twice. See save_once().
+    submission = models.UUIDField(null=True, blank=True, unique=True, editable=False)
 
     objects = TransactionQuerySet.as_manager()
 
@@ -340,6 +369,8 @@ class PlannedTransaction(models.Model):
         User, on_delete=models.PROTECT, related_name="created_planned_transactions", editable=False
     )
     created_at = models.DateTimeField(auto_now_add=True)
+    # The add form it came from (a hidden id), so sending that form twice can't add it twice. See save_once().
+    submission = models.UUIDField(null=True, blank=True, unique=True, editable=False)
 
     # Settling. Null = still open.
     settled_by = models.ForeignKey(

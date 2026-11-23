@@ -28,6 +28,7 @@
     .muted { color: #777; }
     .switch { display: block; font-weight: 600; color: #2b3a55; text-decoration: none; margin-bottom: 1rem; }
     .switch:hover { background: #f3f4f7; }
+    form[data-sending] button { cursor: progress; opacity: .7; }
   </style>
   {% block extra_head %}{% endblock %}
 </head>
@@ -49,5 +50,23 @@
     {% for message in messages %}<p class="msg">{{ message }}</p>{% endfor %}
     {% block content %}{% endblock %}
   </main>
+  <script>
+    // A second click while a form is still being sent would send it again: ignore it until the next page.
+    // (The server refuses an add sent twice anyway; this just shows the first click is on its way.)
+    document.addEventListener("submit", e => {
+      const form = e.target;
+      if (form.method !== "post") return;
+      if (form.dataset.sending) {
+        e.preventDefault();
+        return;
+      }
+      form.dataset.sending = "1";
+      setTimeout(() => { delete form.dataset.sending; }, 10000);  // e.g. the connection dropped: allow a retry
+    });
+    // Back to this page (the browser's Back button): its forms can be sent again.
+    window.addEventListener("pageshow", () => {
+      document.querySelectorAll("form[data-sending]").forEach(form => { delete form.dataset.sending; });
+    });
+  </script>
 </body>
 </html>

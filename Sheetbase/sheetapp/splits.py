@@ -11,7 +11,7 @@ from decimal import Decimal
 from django.core.exceptions import ValidationError
 from django.db import transaction as db_transaction
 
-from .models import PlannedTransaction, Transaction, User
+from .models import AlreadyAdded, PlannedTransaction, Transaction, User
 
 GROSZ = Decimal("0.01")
 
@@ -68,10 +68,6 @@ def plan_split(creditor, amount, participants, description, seed, tag="") -> Spl
     plan = SplitPlan(creditor=creditor, amount=amount, description=description, seed=seed, tag=tag)
     plan.shares = [Share(m, drawn[m]) for m in participants]
     return plan
-
-
-class AlreadyAdded(Exception):
-    """This split was saved already (e.g. Confirm clicked twice)."""
 
 
 def save_split(plan: SplitPlan, created_by, purchase: Transaction | None = None) -> list[PlannedTransaction]:
