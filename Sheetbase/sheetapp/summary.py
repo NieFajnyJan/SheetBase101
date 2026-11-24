@@ -4,7 +4,11 @@ Done transactions only, with their corrected values; cancelled ones don't count.
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
+from datetime import date
+
 from django.db.models import Max, Min, Sum
+from django.db.models.functions import ExtractMonth
+from django.utils import timezone
 
 from .models import Transaction, User
 
@@ -112,6 +116,32 @@ def summarise(transactions, year=None, count_months=False):
     for column in ("purchases", "returns", "paid", "received"):
         setattr(summary, column, sum((getattr(r, column) for r in summary.rows), ZERO))
     return summary
+
+
+def monthly_spent(year):
+    """What members spent on shops in each month of `year` – purchases minus returns, as Total spent
+    overall (payments between members cancel out): 12 amounts, January first."""
+    spent = [ZERO] * 12
+    rows = (Transaction.objects.with_current().filter(cur_date__year=year, cur_cancelled=False).order_by()
+            .annotate(month=ExtractMonth("cur_date")).values("month", "cur_payer", "cur_recipient")
+            .annotate(amount=Sum("cur_amount")))
+    shops = set(User.objects.filter(is_shop=True).values_list("pk", flat=True))
+    for row in rows:
+        payer_shop, recipient_shop = row["cur_payer"] in shops, row["cur_recipient"] in shops
+        if recipient_shop and not payer_shop:
+            spent[row["month"] - 1] += row["amount"].quantize(ZERO)
+        elif payer_shop and not recipient_shop:
+            spent[row["month"] - 1] -= row["amount"].quantize(ZERO)
+    return spent
+
+
+def month_by_month(this_year):
+    """Rows for comparing this year with last year: (month name, this year or None if it hasn't
+    started yet, last year)."""
+    today = timezone.localdate()
+    now, before = monthly_spent(this_year), monthly_spent(this_year - 1)
+    return [(date(2000, m, 1).strftime("%B"), now[m - 1] if (this_year, m) <= (today.year, today.month) else None,
+             before[m - 1]) for m in range(1, 13)]
 
 
 def year_summary(year):
