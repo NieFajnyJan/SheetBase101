@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction as db_transaction
+from django.db import models
 from django.db.models import F
 from django.utils import timezone
 
@@ -166,6 +167,55 @@ def mark_paid(debts, created_by):
             record_payment(payment, chosen={d.pk for d in rows})
             payments.append(payment)
     return payments
+
+
+@dataclass
+class Applied:
+    """What a payment did for one debt: `paid` of its `debt.amount`; `owed` stays owed (a partly paid debt)."""
+    debt: PlannedTransaction
+    paid: Decimal
+
+    @property
+    def owed(self):
+        return self.debt.amount - self.paid
+
+
+def applied(payment: Transaction):
+    """How a payment was spread over the debts it paid, oldest first: all of each, except the last one
+    when the money ran out (a debt is paid at most partly, never past its amount). Exact, because neither
+    a payment that paid debts nor a paid debt can change its amount any more."""
+    remaining = payment.amount
+    result = []
+    for debt in sorted(payment.settled_debts.all(), key=lambda d: (d.created_at, d.pk)):
+        paid = min(debt.amount, remaining)
+        remaining -= paid
+        result.append(Applied(debt, paid))
+    return result
+
+
+@dataclass
+class Blocker:
+    """A debt this transaction made that was paid since, so cancelling it would undo that payment too."""
+    debt: PlannedTransaction
+    payment: Transaction
+
+
+@dataclass
+class CancelEffects:
+    """What cancelling a done transaction would do to the debts."""
+    reopened: list[PlannedTransaction] = field(default_factory=list)  # debts it paid: owed again
+    removed: list[PlannedTransaction] = field(default_factory=list)  # its leftovers and split shares
+    blockers: list[Blocker] = field(default_factory=list)  # why it can't be cancelled, if it can't
+
+
+def cancel_effects(transaction: Transaction) -> CancelEffects:
+    debts = PlannedTransaction.objects.select_related("debtor", "creditor", "settled_by__created_by")
+    effects = CancelEffects(
+        reopened=list(debts.filter(settled_by=transaction).order_by("created_at", "pk")),
+        removed=list(debts.filter(models.Q(created_by_payment=transaction) | models.Q(source=transaction))
+                     .order_by("created_at", "pk")))
+    effects.blockers = [Blocker(d, d.settled_by) for d in effects.removed if d.is_settled]
+    return effects
 
 
 def check_can_undo(payment: Transaction):

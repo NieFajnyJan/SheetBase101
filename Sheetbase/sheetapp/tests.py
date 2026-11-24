@@ -1620,6 +1620,34 @@ class PayingDebtsTests(TestCase):
         self.assertFalse(self.refresh(d)[0].is_settled)
 
 
+    # --- What a payment did, and what cancelling it would do
+
+    def test_history_shows_what_a_partial_payment_covered(self):
+        self.debt("30.00", description="Krzesło")
+        self.pay("10.00")
+        self.assertContains(self.client.get(self.url), "Krzesło 10,00\xa0zł of 30,00\xa0zł – 20,00\xa0zł still owed")
+
+    def test_cancel_page_lists_what_changes(self):
+        self.debt("30.00", description="Krzesło")
+        pay = self.pay("100.00")
+        page = self.client.get(reverse("cancel_transaction", args=[pay.pk]))
+        self.assertContains(page, "Owed again – it paid them")
+        self.assertContains(page, "ola owes jan 30,00\xa0zł – Krzesło")
+        self.assertContains(page, "Deleted – it made them")
+        self.assertContains(page, "jan owes ola 70,00\xa0zł")
+
+    def test_cancel_page_names_the_payment_that_blocks_it(self):
+        self.debt("30.00")
+        pay = self.pay("100.00")  # Jan now owes Ola 70
+        back = Transaction(payer=self.jan, recipient=self.ola, amount=Decimal("70.00"), description="Oddaję",
+                           created_by=self.jan)
+        record_payment(back)
+        page = self.client.get(reverse("cancel_transaction", args=[pay.pk]))
+        self.assertContains(page, "It can't be cancelled yet.")
+        self.assertContains(page, f'href="{self.url}#t-{back.pk}"')
+        self.assertContains(page, "added by jan")
+
+    # --- The confirmation screen
 class GroupRestsMigrationTests(TestCase):
     """Rests added before they kept their debt's group join it when migrating, written to the audit log."""
 

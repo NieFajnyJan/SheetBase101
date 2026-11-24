@@ -205,13 +205,17 @@ class Transaction(models.Model):
         return not self.settled_debts.exists() and self.leftovers.exists()
 
     def paid_for(self):
-        """The debts this payment paid, when listing them tells you something: it paid several, or one
-        that differs from the payment itself. Prefetch "settled_debts" when listing many transactions."""
-        debts = list(self.settled_debts.all())
+        """What this payment paid of each debt (payments.Applied), when listing it tells you something:
+        it paid several, only part of one, or one that differs from the payment itself.
+        Prefetch "settled_debts" when listing many transactions."""
+        from .payments import applied
+
+        spread = applied(self)
         current = self.current
-        if len(debts) == 1 and (debts[0].description, debts[0].amount) == (current.description, current.amount):
+        if len(spread) == 1 and not spread[0].owed and (spread[0].debt.description, spread[0].debt.amount) == (
+                current.description, current.amount):
             return []
-        return debts
+        return spread
 
     def can_be_corrected_by(self, user):
         """Only whoever added the transaction can correct or cancel it, and not once it's cancelled."""

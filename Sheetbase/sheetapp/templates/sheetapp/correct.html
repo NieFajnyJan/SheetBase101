@@ -3,7 +3,13 @@
 
 {% block title %}{% if cancelling %}Cancel{% else %}Correct{% endif %} transaction · SheetBase{% endblock %}
 
-{% block extra_head %}{% if not cancelling %}{% include "sheetapp/_datepicker.html" %}{% endif %}{% endblock %}
+{% block extra_head %}{% if not cancelling %}{% include "sheetapp/_datepicker.html" %}{% endif %}
+<style>
+  .blocked { background: #fde8ea; border-radius: 6px; padding: .2rem 1rem; }
+  .effect-head { font-weight: 600; margin-bottom: .2rem; }
+  .card ul { margin-top: .2rem; padding-left: 1.2rem; }
+</style>
+{% endblock %}
 
 {% block content %}
   {% with c=transaction.current %}
@@ -14,6 +20,29 @@
       <p><strong>{{ c.date|day }} · {{ c.payer }} → {{ c.recipient }} · {{ c.description }} · {{ c.amount|zl }}</strong></p>
       <p class="muted">It stays in the history, marked “Cancelled”, and stops counting towards totals.
         It can't be un-cancelled – add a new transaction instead.</p>
+      {% with e=effects %}
+        {% if e.blockers %}
+          <div class="blocked">
+            <p><strong>It can't be cancelled yet.</strong> A debt it made has been paid since:</p>
+            <ul>{% for b in e.blockers %}
+              <li>{{ b.debt.debtor }} paid {{ b.debt.creditor }} {{ b.debt.amount|zl }} for “{{ b.debt.description }}” –
+                <a href="{% url 'transactions' %}#t-{{ b.payment.pk }}">the payment of {{ b.payment.current.date|day }}</a>,
+                added by {{ b.payment.created_by }}. Cancel that payment first.</li>
+            {% endfor %}</ul>
+          </div>
+        {% endif %}
+        {% if e.reopened or e.removed %}
+          <p>Cancelling it also changes the planned transactions:</p>
+          {% if e.reopened %}
+            <p class="effect-head">Owed again – it paid them:</p>
+            <ul>{% for d in e.reopened %}<li>{{ d.debtor }} owes {{ d.creditor }} {{ d.amount|zl }} – {{ d.description }}</li>{% endfor %}</ul>
+          {% endif %}
+          {% if e.removed %}
+            <p class="effect-head">Deleted – it made them:</p>
+            <ul>{% for d in e.removed %}<li>{{ d.debtor }} owes {{ d.creditor }} {{ d.amount|zl }} – {{ d.description }}{% if d.is_settled %} <strong>(already paid)</strong>{% endif %}</li>{% endfor %}</ul>
+          {% endif %}
+        {% endif %}
+      {% endwith %}
     {% else %}
       <h2>Correct transaction</h2>
       <p class="muted">Change whatever was wrong. The original stays in the history.</p>
