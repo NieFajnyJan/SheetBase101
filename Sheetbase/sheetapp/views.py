@@ -125,7 +125,8 @@ def transactions(request):
             return confirm_payment(request, form, obj, paying)
 
     years = Transaction.objects.with_current().annotate(y=ExtractYear("cur_date")).values_list("y", flat=True)
-    filter_form = HistoryFilterForm(request.GET, years=set(years))
+    # Its own ids: the add form above has a payer and a recipient too, and a label must point at one box.
+    filter_form = HistoryFilterForm(request.GET, years=set(years), auto_id="filter_%s")
     done = transactions_with_history().order_by("-cur_date", "-created_at")
     # A filter that can't be read shows nothing, rather than everything under a total that looks filtered.
     valid = filter_form.is_valid()

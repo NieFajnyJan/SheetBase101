@@ -8,7 +8,7 @@
 <style>
   main { max-width: 1100px; }
   .card h2 { margin-top: 0; font-size: 1.15rem; }
-  .card p { margin: .5rem 0; }
+  .card p, .card .field { margin: .5rem 0; }
   /* Add form centred; the shop box sits beside it, collapsed until clicked. */
   .forms { display: grid; grid-template-columns: 1fr minmax(0, 480px) 1fr; gap: 1rem; align-items: start; }
   .forms > .form-card { grid-column: 2; }
@@ -37,12 +37,12 @@
   button.tag { cursor: pointer; }
   .tag-cancelled { background: #fde8ea; color: #b00020; }
   tr.has-history { cursor: pointer; }
-  tr.cancelled td.val { text-decoration: line-through; color: #888; }
+  tr.cancelled td.val { text-decoration: line-through; color: var(--muted); }
   td.actions a { margin-right: .6rem; }
   /* What a payment paid; a debt from a purchase links to it, and the linked row lights up. */
-  .paid-for { color: #777; font-size: .85rem; }
-  /* Links to a purchase: the grey of the line around them, a faint underline that darkens on hover. */
-  .paid-for a { color: inherit; text-decoration: underline; text-decoration-color: #d4d7de; text-underline-offset: 2px; }
+  .paid-for { color: var(--muted); font-size: .85rem; }
+  /* Links to a purchase: the grey of the line around them, underlined, darker on hover. */
+  .paid-for a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
   .paid-for a:hover { color: #2b3a55; text-decoration-color: currentColor; }
   tr:target > td { background: #fff4cc; }
   tr[id] { scroll-margin-top: 4rem; }
@@ -50,11 +50,12 @@
   .history ol { list-style: none; margin: 0; padding: 0; }
   .history li { padding: .4rem 0; border-bottom: 1px dashed #dde; }
   .history li:last-child { border-bottom: 0; }
-  .history .who { color: #777; font-size: .85rem; }
+  .history .who { color: var(--muted); font-size: .85rem; }
 </style>
 {% endblock %}
 
 {% block content %}
+  <h1 class="visually-hidden">Transactions</h1>
   <div class="forms">
     <form class="card form-card" method="post">
       {% csrf_token %}
@@ -95,9 +96,9 @@
     {% for field in filter_form %}{% if field.name != "hide_cancelled" %}
       <p>{{ field.label_tag }} {{ field }}{{ field.errors }}</p>
     {% endif %}{% endfor %}
-    <button class="btn">Filter</button>
-    {# Applies straight away – no need to press Filter. #}
+    {# Applied with the rest by Filter – ticking it alone doesn't reload the page under you. #}
     <label class="toggle">{{ filter_form.hide_cancelled }} Hide cancelled</label>
+    <button class="btn">Filter</button>
     {% if filtered %}<a href="{% url 'transactions' %}#done">Clear</a>{% endif %}
   </form>
   {% if not filters_valid %}
@@ -109,16 +110,19 @@
   {% if transactions %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Date paid</th><th>Paid by</th><th>Paid to</th><th>Description</th><th class="num">Amount</th><th>Added by</th><th>Added</th><th></th></tr></thead>
+        {# Amount right after the date: on a phone it's in view without scrolling sideways. #}
+        <thead><tr><th>Date paid</th><th class="num">Amount</th><th>Paid by</th><th>Paid to</th><th>Description</th><th>Added by</th><th>Added</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {% for t in transactions %}
             {% with c=t.current paid_for=t.paid_for %}
             <tr id="t-{{ t.pk }}" class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
                 {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
-              <td class="val">{{ c.date|day }}</td><td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
+              <td class="val">{{ c.date|day }}</td><td class="num val">{{ c.amount|zl }}</td>
+              <td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
               <td class="desc"><span class="val">{{ c.description }}</span>
-                {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}">Cancelled</button>
-                {% elif t.is_corrected %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}">corrected ×{{ t.corrections.all|length }}</button>{% endif %}
+                {# Show or hide its history. The name starts with the visible text, so it can be said aloud to click it. Without JavaScript the history simply stays shown. #}
+                {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}" aria-expanded="true" aria-label="Cancelled – history of changes">Cancelled</button>
+                {% elif t.is_corrected %}{% with n=t.corrections.all|length %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}" aria-expanded="true" aria-label="corrected ×{{ n }} – history of changes">corrected ×{{ n }}</button>{% endwith %}{% endif %}
                 {% if paid_for %}
                   <div class="paid-for">Paid for:
                     {% for a in paid_for %}{% with d=a.debt %}{% if d.source_id %}<a href="{% url 'transactions' %}#t-{{ d.source_id }}">{{ d.description }}</a>{% else %}{{ d.description }}{% endif %} {% if a.owed %}{{ a.paid|zl }} of {{ d.amount|zl }} – {{ a.owed|zl }} still owed{% else %}{{ d.amount|zl }}{% endif %}{% if not forloop.last %}; {% endif %}{% endwith %}{% endfor %}
@@ -130,11 +134,11 @@
                     summaries leave it out. Correct who paid whom, or cancel it.</div>
                 {% endif %}
               </td>
-              <td class="num val">{{ c.amount|zl }}</td><td>{{ t.created_by }}</td><td>{{ t.created_at|day }}</td>
+              <td>{{ t.created_by }}</td><td>{{ t.created_at|day }}</td>
               <td class="actions">{% if t|correctable_by:user %}<a href="{% url 'correct_transaction' t.pk %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}">Cancel</a>{% endif %}</td>
             </tr>
             {% if t.is_corrected %}
-              <tr class="history" id="history-{{ t.pk }}" hidden>
+              <tr class="history" id="history-{{ t.pk }}">
                 <td colspan="8">
                   <ol>
                     {% for e in t.history %}
@@ -156,7 +160,7 @@
             {% endwith %}
           {% endfor %}
         </tbody>
-        <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td colspan="3"></td></tr></tfoot>
+        <tfoot><tr><td>Total</td><td class="num">{{ total|zl }}</td><td colspan="6"></td></tr></tfoot>
       </table>
     </div>
   {% elif not filters_valid %}
@@ -166,14 +170,19 @@
     <p class="card muted">No transactions yet – add the first one above.</p>
   {% endif %}
   <script>
-    document.getElementById("id_hide_cancelled").addEventListener("change", e => e.target.form.submit());
-
-    // Clicking a corrected transaction shows / hides its history of corrections under it.
+    // Histories start hidden; clicking a corrected transaction (or its tag) shows / hides its history under it,
+    // and the tag says whether it's open.
     document.querySelectorAll("tr.has-history").forEach(row => {
+      const history = document.getElementById(row.dataset.history);
+      const tag = row.querySelector("button.tag");
+      const show = open => {
+        history.hidden = !open;
+        tag.setAttribute("aria-expanded", open);
+      };
+      show(false);
       row.addEventListener("click", e => {
         if (e.target.closest("a")) return;  // Correct / Cancel links work as normal
-        const history = document.getElementById(row.dataset.history);
-        history.hidden = !history.hidden;
+        show(history.hidden);
       });
     });
   </script>

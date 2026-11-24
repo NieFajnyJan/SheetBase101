@@ -8,7 +8,7 @@
   .shares { list-style: none; padding: 0; margin: .5rem 0 1rem; }
   .shares li { display: flex; gap: .6rem; align-items: baseline; padding: .4rem 0; border-bottom: 1px dashed #dde; }
   .shares .who { flex: 1; }
-  .shares .own { color: #777; }
+  .shares .own { color: var(--muted); }
   .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
   .sum { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; }
   .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
@@ -22,7 +22,7 @@
     {% for field in form %}{% if field.name != "split_seed" %}{{ field.as_hidden }}{% endif %}{% endfor %}
     <input type="hidden" name="split_seed" value="{{ plan.seed }}">
 
-    <h2>Confirm split</h2>
+    <h1>Confirm split</h1>
     {% if purchase %}
       <p><strong>{{ purchase.date|day }} · {{ purchase.payer }} → {{ purchase.recipient }} · {{ purchase.description }} · {{ purchase.amount|zl }}</strong></p>
     {% else %}

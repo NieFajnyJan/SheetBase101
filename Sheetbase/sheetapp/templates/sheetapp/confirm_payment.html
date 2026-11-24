@@ -5,12 +5,14 @@
 
 {% block extra_head %}
 <style>
+  .debts { border: 0; margin: 0; padding: 0; min-width: 0; }
+  .debts legend { padding: 0; margin: .8rem 0 0; }
   .covers { list-style: none; padding: 0; margin: .5rem 0 1rem; }
   .covers li { border-bottom: 1px dashed #dde; }
   .covers label { display: flex; align-items: baseline; gap: .6rem; font-weight: 400; margin: 0; padding: .4rem 0; cursor: pointer; }
   .covers .what { flex: 1; }
-  .covers .origin { display: block; font-size: .85rem; color: #666; }
-  .covers .status { display: block; min-height: 1.3em; font-size: .85rem; color: #777; }
+  .covers .origin { display: block; font-size: .85rem; color: var(--muted); }
+  .covers .status { display: block; min-height: 1.3em; font-size: .85rem; color: var(--muted); }
   .covers .status.paid { color: #1e7a3c; }
   .covers .status.partly, .covers .status.ran_out { color: #a05a00; }
   .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -32,14 +34,16 @@
     <input type="hidden" name="choosing" value="1">
     <input type="hidden" name="ticked_for" value="{{ ticks_key }}">
 
-    <h2>Confirm payment</h2>
+    <h1>Confirm payment</h1>
     <p><strong>{{ payment.date|day }} · {{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
     {% if plan.debts %}
+      {# A group of tick boxes: the question above them is its legend, read out with each box. #}
+      <fieldset class="debts">
       {% if paying %}
-        <p>This payment of {{ payment.amount|zl }} is for “{{ paying.description }}”, so that stays ticked. Tick other debts too if it pays them as well.</p>
+        <legend>This payment of {{ payment.amount|zl }} is for “{{ paying.description }}”, so that stays ticked. Tick other debts too if it pays them as well.</legend>
       {% else %}
-        <p>What is this payment of {{ payment.amount|zl }} for? The oldest debts are ticked, as far as the money goes; change the ticks if it's for something else.</p>
+        <legend>What is this payment of {{ payment.amount|zl }} for? The oldest debts are ticked, as far as the money goes; change the ticks if it's for something else.</legend>
       {% endif %}
       <ul class="covers">
         {% for debt, ticked, status in plan.rows %}
@@ -65,6 +69,7 @@
           </label></li>
         {% endfor %}
       </ul>
+      </fieldset>
     {% else %}
       <p>{{ payment.payer }} doesn't owe {{ payment.recipient }} anything.</p>
     {% endif %}
