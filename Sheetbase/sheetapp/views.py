@@ -162,9 +162,9 @@ def confirm_payment(request, form, payment, paying=None):
         messages.error(request, problem)
     elif "confirm" in request.POST:
         try:
-            # Checked before the plan: once the first click has paid the debts, the plan differs too.
+            # Once the first click has paid the debts, the plan differs too: then it's AlreadyAdded.
             save_once(Transaction, payment.submission, lambda: record_payment(
-                payment, chosen=chosen, expected_signature=request.POST.get("plan", "")))
+                payment, chosen=chosen, expected_signature=request.POST.get("plan", "")), also=(PlanChanged,))
         except AlreadyAdded as e:  # e.g. Confirm clicked twice
             messages.info(request, f"Already added: {e.record}")
             return redirect("planned" if paying else request.get_full_path())
@@ -276,8 +276,13 @@ def edit_planned(request, pk):
     debt = open_debt(pk)
     form = EditPlannedForm(request.POST or None, instance=debt)
     if request.method == "POST" and form.is_valid():
-        messages.success(request, f"Saved: {form.save()}")
-        return redirect("planned")
+        try:
+            saved = form.save()
+        except ValidationError as e:  # changed by someone else at the same moment
+            form.add_error(None, e)
+        else:
+            messages.success(request, f"Saved: {saved}")
+            return redirect("planned")
     return render(request, "sheetapp/planned_edit.html", {"form": form})
 
 

@@ -297,6 +297,14 @@ def today():
     return timezone.localdate()
 
 
+def edit(debt, **fields):
+    """Someone else changes a debt, as the Planned page's edit does."""
+    debt = PlannedTransaction.objects.get(pk=debt.pk)
+    for name, value in fields.items():
+        setattr(debt, name, value)
+    debt.save()
+
+
 class AddTransactionTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com")  # an ordinary member
@@ -684,6 +692,31 @@ class CorrectionTests(TestCase):
         self.correct(amount="12.49")
         self.correct(amount="13.00")
         self.assertEqual(self.total(), Decimal("13.00"))
+        self.assertEqual([c.version for c in self.row().corrections.all()], [2, 1])
+
+    def correct_meanwhile(self, data):
+        """Someone else saves a correction of the same version after this form was checked."""
+        TransactionCorrection.objects.create(original=self.t, amount=Decimal("1.00"), payer=self.jan,
+                                             recipient=self.shop, description="Kawa", date=today(),
+                                             reason="theirs", created_by=self.ola)
+
+    def test_correction_sent_at_the_same_moment_as_another_is_refused(self):
+        # check_loan runs last in clean(): after the check that the page is up to date, before saving.
+        with mock.patch("sheetapp.forms.CorrectionForm.check_loan", autospec=True,
+                        side_effect=lambda form, data: self.correct_meanwhile(data)):
+            page = self.correct(amount="12.49")
+        self.assertContains(page, "corrected by someone else at the same moment")
+        self.assertEqual(self.row().current.amount, Decimal("1.00"))  # theirs stays, ours isn't saved
+        self.assertEqual(self.row().corrections.count(), 1)
+
+    def test_corrections_of_the_same_version_cant_both_be_saved(self):
+        first, second = (TransactionCorrection(original=self.t, version=1, amount=Decimal(a), payer=self.jan,
+                                               recipient=self.shop, description="Kawa", date=today(),
+                                               reason="typo", created_by=self.jan) for a in ("1.00", "2.00"))
+        first.save()
+        with self.assertRaisesMessage(ValidationError, "at the same moment"):
+            second.save()
+        self.assertEqual(self.row().current.amount, Decimal("1.00"))
 
     def test_any_field_can_change_and_filters_follow(self):
         last_year = date(today().year - 1, 6, 15)
@@ -1238,7 +1271,7 @@ class PayingDebtsTests(TestCase):
     def test_debt_description_changed_meanwhile_is_shown_again(self):
         d, other = self.debt("90.00", description="Krzesło"), self.debt("20.00", description="Kawa")
         page = self.confirm_after(
-            lambda: PlannedTransaction.objects.filter(pk=d.pk).update(description="Biurko"), "90.00")
+            lambda: edit(d, description="Biurko"), "90.00")
         self.assertContains(page, "please check it again")
         self.assertFalse(Transaction.objects.exists())
         self.assertContains(page, "Changed – check it", count=1)
@@ -1252,8 +1285,8 @@ class PayingDebtsTests(TestCase):
         a, b = self.debt("30.00"), self.debt("50.00")
 
         def change():  # still 80 together, so the same debts are paid exactly
-            PlannedTransaction.objects.filter(pk=a.pk).update(amount=Decimal("40.00"))
-            PlannedTransaction.objects.filter(pk=b.pk).update(amount=Decimal("40.00"))
+            edit(a, amount=Decimal("40.00"))
+            edit(b, amount=Decimal("40.00"))
 
         page = self.confirm_after(change, "80.00")
         self.assertContains(page, "please check it again")
@@ -1691,14 +1724,22 @@ class SentTwiceTests(TestCase):
                                            description="x", created_by=self.jan, submission=self.submission)
         second = Transaction(amount=Decimal("1.00"), payer=self.jan, recipient=self.shop, description="x",
                              created_by=self.jan, submission=self.submission)
-        real = Transaction.objects.filter
-        # The first one isn't there yet when the second checks, only when the database refuses the second.
-        with mock.patch.object(Transaction.objects, "filter",
-                               side_effect=[Transaction.objects.none(), real(submission=self.submission)]):
-            with self.assertRaises(AlreadyAdded) as added:
-                save_once(Transaction, self.submission, second.save)
+        # Nothing is looked up first: the database refuses the second, and only then is the first found.
+        with CaptureQueriesContext(connection) as queries, self.assertRaises(AlreadyAdded) as added:
+            save_once(Transaction, self.submission, second.save)
         self.assertEqual(added.exception.record, first)
         self.assertEqual(Transaction.objects.count(), 1)
+        lookups = [i for i, q in enumerate(queries) if '"submission" =' in q["sql"]]
+        inserts = [i for i, q in enumerate(queries) if q["sql"].startswith("INSERT")]
+        self.assertEqual(len(lookups), 1)
+        self.assertLess(inserts[0], lookups[0])
+
+    def test_saving_looks_nothing_up(self):
+        t = Transaction(amount=Decimal("1.00"), payer=self.jan, recipient=self.shop, description="x",
+                        created_by=self.jan, submission=self.submission)
+        with CaptureQueriesContext(connection) as queries:
+            save_once(Transaction, self.submission, t.save)
+        self.assertFalse([q for q in queries if '"submission" =' in q["sql"]])
 
 
 class PlannedGroupTests(TestCase):
@@ -1853,6 +1894,27 @@ class PlannedPageTests(TestCase):
         d.refresh_from_db()
         self.assertEqual((d.debtor, d.amount, d.description), (self.ewa, Decimal("12.50"), "Pizza duża"))
 
+    def test_edit_sent_at_the_same_moment_as_another_is_refused(self):
+        d = self.debt()
+        mine, theirs = PlannedTransaction.objects.get(pk=d.pk), PlannedTransaction.objects.get(pk=d.pk)
+        theirs.amount = Decimal("20.00")
+        theirs.save()
+        mine.amount = Decimal("30.00")
+        with self.assertRaisesMessage(ValidationError, "at the same moment"):
+            mine.save()
+        d.refresh_from_db()
+        self.assertEqual((d.amount, d.version), (Decimal("20.00"), 1))
+
+    def test_edit_page_refuses_a_save_from_an_older_version(self):
+        d = self.debt()
+        with mock.patch("sheetapp.forms.EditPlannedForm.check_up_to_date", autospec=True,
+                        side_effect=lambda form, data: edit(d, amount=Decimal("20.00"))):
+            page = self.client.post(self.edit_url(d), {"debtor": self.ola.pk, "creditor": self.jan.pk,
+                                                       "amount": "30,00", "description": "Pizza"})
+        self.assertContains(page, "at the same moment")
+        d.refresh_from_db()
+        self.assertEqual(d.amount, Decimal("20.00"))
+
     def test_edit_validates(self):
         d = self.debt()
         response = self.client.post(self.edit_url(d), {"debtor": self.jan.pk, "creditor": self.jan.pk,
@@ -1896,7 +1958,7 @@ class PlannedPageTests(TestCase):
         a, b = self.debt("100.00"), self.debt("100.00", debtor=self.ewa)
         PlannedTransaction.objects.filter(pk__in=[a.pk, b.pk]).make_group()
         shown = self.shown_rows(a)
-        PlannedTransaction.objects.filter(pk=b.pk).update(amount=Decimal("400.00"))  # someone else edits it
+        edit(b, amount=Decimal("400.00"))  # someone else edits it
         page = self.client.post(self.delete_url(a), {"rows": shown})
         self.assertContains(page, "changed after you opened this page")
         self.assertContains(page, "changed or added since, check it", count=1)

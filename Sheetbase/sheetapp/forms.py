@@ -123,6 +123,7 @@ class CorrectionForm(UpToDateMixin, TransactionForm):
         kwargs["initial"] = {f: getattr(self.current, f) for f in CORRECTABLE_FIELDS}
         super().__init__(*args, **kwargs)
         self.instance.original = original
+        self.instance.version = self.current.version + 1  # replaces the version checked here
         self.add_shown_field(self.current, CORRECTABLE_FIELDS)
         # The loan this payment made, if it was changed on the Planned page since: correcting what was
         # changed there too then needs a choice – does the loan follow the correction or keep its own value?
@@ -181,6 +182,7 @@ class CancelForm(UpToDateMixin, forms.ModelForm):
         for f in CORRECTABLE_FIELDS:
             setattr(self.instance, f, getattr(current, f))
         self.instance.original = original
+        self.instance.version = current.version + 1  # replaces the version checked here
         self.instance.cancelled = True
         self.add_shown_field(current, CORRECTABLE_FIELDS)
 
