@@ -2125,6 +2125,19 @@ class PlannedPageTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Mark paid
+    def test_balance_per_person(self):
+        self.debt("10.00", debtor=self.ola)
+        self.debt("2.50", debtor=self.ola)
+        self.debt("5.00", debtor=self.ewa)
+        self.debt("3.00", debtor=self.jan, creditor=self.ewa)
+        self.debt("7.00", debtor=self.ola, creditor=self.ewa)  # not Jan's
+        page = self.client.get(self.url)
+        self.assertEqual(page.context["owed_to_me"], ([(self.ewa, Decimal("5.00")), (self.ola, Decimal("12.50"))],
+                                                      Decimal("17.50")))
+        self.assertEqual(page.context["i_owe"], ([(self.ewa, Decimal("3.00"))], Decimal("3.00")))
+        self.assertContains(page, "Owed to me")
+
+
 class MarkPaidTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com")

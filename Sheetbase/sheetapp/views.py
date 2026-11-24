@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -284,7 +285,22 @@ def planned(request):
         "form": form,
         "debts": debts,
         "total": debts.aggregate(t=Sum("amount"))["t"] or 0,
+        "owed_to_me": balances(debts, request.user, "creditor"),
+        "i_owe": balances(debts, request.user, "debtor"),
     })
+
+
+def balances(debts, user, side):
+    """The open debts where `user` is on `side` ("creditor": owed to them, "debtor": they owe), added up
+    per other person: ([(person, amount), ...] by name, total)."""
+    other = "debtor" if side == "creditor" else "creditor"
+    per_person = {}
+    for debt in debts:
+        if getattr(debt, f"{side}_id") == user.pk:
+            person = getattr(debt, other)
+            per_person[person] = per_person.get(person, 0) + debt.amount
+    rows = sorted(per_person.items(), key=lambda row: str(row[0]).lower())
+    return rows, sum((amount for _, amount in rows), Decimal("0.00"))
 
 
 def open_debt(pk):
