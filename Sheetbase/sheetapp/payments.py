@@ -10,6 +10,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction as db_transaction
+from django.db.models import F
 from django.utils import timezone
 
 from .models import PlannedTransaction, Transaction, User
@@ -41,11 +42,11 @@ class PaymentPlan:
     leftover: Leftover | None = None
 
     def reviewed(self):
-        """What Confirm commits to, as the confirmation screen shows it: each debt paid – which one, how
-        much and what for – and the leftover."""
+        """What Confirm commits to, as the confirmation screen shows it: which debts it pays, each in
+        its version (see PlannedTransaction.version), and the leftover."""
         left = self.leftover
         return {
-            "paid": [[d.pk, str(d.amount), d.description, d.tag] for d in self.covered],
+            "paid": [[d.pk, d.version] for d in self.covered],
             "leftover": [left.debtor.pk, left.creditor.pk, str(left.amount), left.description] if left else None,
         }
 
@@ -55,18 +56,16 @@ class PaymentPlan:
         return json.dumps(self.reviewed(), ensure_ascii=False, separators=(",", ":"))
 
     def changes_since(self, signature):
-        """Compared with the plan that had `signature`: the debts paid differently now (newly paid, no longer
-        paid, or with another amount or description), and whether the leftover differs."""
+        """Compared with the plan that had `signature`: the debts paid differently now (newly paid, no
+        longer paid, or changed), and whether the leftover differs."""
         try:
             before = json.loads(signature)
-            paid_before = {row[0]: row for row in before["paid"]}
-            leftover_before = before["leftover"]
-        except (ValueError, KeyError, TypeError, IndexError):
+            paid_before, leftover_before = dict(before["paid"]), before["leftover"]
+        except (ValueError, KeyError, TypeError):
             return {d.pk for d in self.debts}, True  # can't tell: check it all
         now = self.reviewed()
-        paid_now = {row[0]: row for row in now["paid"]}
-        debts = {pk for pk in paid_before.keys() | paid_now.keys() if paid_before.get(pk) != paid_now.get(pk)}
-        return debts, leftover_before != now["leftover"]
+        paid_now = dict(now["paid"])
+        return {pk for pk, _ in paid_before.items() ^ paid_now.items()}, leftover_before != now["leftover"]
 
     def rows(self):
         """For the confirmation screen: each open debt, whether it's ticked, and what happens to it:
@@ -144,7 +143,7 @@ def record_payment(payment: Transaction, chosen=None, expected_signature=None) -
             raise PlanChanged(plan)
         payment.save()
         PlannedTransaction.objects.filter(pk__in=[d.pk for d in plan.covered]).update(
-            settled_by=payment, settled_at=timezone.now())
+            settled_by=payment, settled_at=timezone.now(), version=F("version") + 1)
         if left := plan.leftover:
             PlannedTransaction.objects.create(
                 debtor=left.debtor, creditor=left.creditor, amount=left.amount, description=left.description,
@@ -217,4 +216,4 @@ def undo_payment(payment: Transaction):
         leftovers = payment.leftovers.select_for_update()
         check_can_undo(payment)
         leftovers.delete()
-        payment.settled_debts.update(settled_by=None, settled_at=None)
+        payment.settled_debts.update(settled_by=None, settled_at=None, version=F("version") + 1)

@@ -60,20 +60,17 @@ class AlreadyAdded(Exception):
         self.record = record
 
 
-def save_once(model, submission, save):
+def save_once(model, submission, save, also=()):
     """Runs save(), which adds a `model` record from the add form with this submission id, unless
     that form was sent before: then raises AlreadyAdded and saves nothing. The id is unique in the
-    database, so this holds even when both arrive at the same moment. No id (None): just saves."""
-    def added_before():
-        return submission and model.objects.filter(submission=submission).first()
-
+    database, so the second one fails to save, also when both arrive at the same moment; only then is
+    the first one looked up. `also`: other exceptions save() raises when it was sent before (e.g. the
+    debts a payment was for are already paid – by the first one). No id (None): just saves."""
     try:
         with db_transaction.atomic():
-            if first := added_before():
-                raise AlreadyAdded(first)
             return save()
-    except IntegrityError:
-        if first := added_before():
+    except (IntegrityError, *also):
+        if submission and (first := model.objects.filter(submission=submission).first()):
             raise AlreadyAdded(first) from None
         raise
 
@@ -168,6 +165,9 @@ class Transaction(models.Model):
         check_parties(self)
 
     # A done transaction is final: it can be added, never edited or deleted.
+    # The original is version 0 of itself; each correction is the next one (see TransactionCorrection.version).
+    version = 0
+
     def save(self, *args, **kwargs):
         if not self._state.adding:
             raise ValueError("A done transaction can't be edited.")
@@ -249,10 +249,14 @@ class TransactionCorrection(models.Model):
     reason = models.CharField(max_length=255, help_text="Why it's being corrected.")
     created_by = models.ForeignKey(User, on_delete=models.PROTECT, related_name="+", editable=False)
     created_at = models.DateTimeField(auto_now_add=True)
+    # Which correction of the original this is: 1, 2, ... – the version it replaces plus one. Unique per
+    # original, so of two corrections of the same version sent at the same moment only the first is saved.
+    version = models.PositiveIntegerField(editable=False)
 
     class Meta:
         ordering = ["-created_at", "-pk"]
         constraints = [
+            models.UniqueConstraint(fields=["original", "version"], name="correction_version_unique"),
             models.CheckConstraint(
                 condition=~models.Q(payer=models.F("recipient")),
                 name="correction_payer_is_not_recipient",
@@ -312,8 +316,21 @@ class TransactionCorrection(models.Model):
         return any(getattr(self, f) != getattr(current, f) for f in MONEY_FIELDS)
 
     def save(self, *args, **kwargs):
+        """Set `version` to the one after the version this corrects, as it was shown (the correction form
+        does); left empty, it follows the latest one."""
         if not self._state.adding:
             raise ValueError("A correction can't be edited.")
+        if self.version is None:
+            self.version = self.original.corrections.count() + 1
+        try:
+            self._save(*args, **kwargs)
+        except IntegrityError:
+            if self.original.corrections.filter(version=self.version).exists():
+                raise ValidationError("This transaction was corrected by someone else at the same moment, "
+                                      "so nothing was saved. Open it again to see what it is now.") from None
+            raise
+
+    def _save(self, *args, **kwargs):
         with db_transaction.atomic():
             # Only when something the loan copies changed, so a date fix keeps edits made to the loan itself.
             # A loan already paid back is history: a description fix leaves it as it was
@@ -343,23 +360,24 @@ class GroupChanged(Exception):
     """The rows a delete would remove aren't the ones the user was shown any more."""
 
 
-def _shown(row):
-    return [row.pk, row.debtor_id, row.creditor_id, str(row.amount), row.description]
+def versions(rows):
+    """{pk: version} of these planned transactions: any change to one gives it a new version."""
+    return {r.pk: r.version for r in rows}
 
 
 def rows_signature(rows):
-    """What a Delete page shows of these planned transactions – which ones, who owes whom, how much,
-    what for – sent with Delete, so it deletes exactly what was shown."""
-    return json.dumps(sorted(_shown(r) for r in rows), ensure_ascii=False, separators=(",", ":"))
+    """Which planned transactions a Delete page shows, in which version – sent with Delete, so it deletes
+    exactly what was shown."""
+    return json.dumps(sorted(versions(rows).items()), separators=(",", ":"))
 
 
 def changed_rows(rows, signature):
-    """Of these rows, the ones that differ from the rows with `signature` or weren't among them."""
+    """Of these rows, the ones changed since the rows with `signature`, or not among them."""
     try:
-        before = {entry[0]: entry for entry in json.loads(signature)}
-    except (ValueError, TypeError, IndexError, KeyError):
+        before = dict(json.loads(signature))
+    except (ValueError, TypeError):
         return {r.pk for r in rows}
-    return {r.pk for r in rows if before.get(r.pk) != _shown(r)}
+    return {pk for pk, version in versions(rows).items() if before.get(pk) != version}
 
 
 class PlannedTransactionQuerySet(AuditedQuerySet):
@@ -423,6 +441,9 @@ class PlannedTransaction(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     # The add form it came from (a hidden id), so sending that form twice can't add it twice. See save_once().
     submission = models.UUIDField(null=True, blank=True, unique=True, editable=False)
+    # Goes up by one with each change, so a page can tell whether a debt changed since it showed it,
+    # and a save from an older version is refused (see save()).
+    version = models.PositiveIntegerField(default=0, editable=False)
 
     # Settling. Null = still open.
     settled_by = models.ForeignKey(
@@ -477,9 +498,22 @@ class PlannedTransaction(models.Model):
 
     # A settled debt is history: it can't be changed or deleted (only reopened when the payment that settled it is cancelled).
     def save(self, *args, **kwargs):
-        if not self._state.adding and PlannedTransaction.objects.settled().filter(pk=self.pk).exists():
-            raise ValueError("A settled planned transaction can't be edited.")
-        super().save(*args, **kwargs)
+        if self._state.adding:
+            return super().save(*args, **kwargs)
+        with db_transaction.atomic():
+            # Only from the version it was loaded in: the version goes up in the same step, so of two
+            # changes made at the same moment the second one is refused rather than replacing the first.
+            # Paying it counts as a change too. (_base_manager: not logged on its own – the save below logs
+            # the whole change.)
+            bumped = (PlannedTransaction._base_manager.filter(pk=self.pk, version=self.version)
+                      .update(version=F("version") + 1))
+            if not bumped:
+                raise ValidationError("This debt was changed or paid by someone else at the same moment, so "
+                                      "nothing was saved. Open it again to see what it is now.")
+            if PlannedTransaction.objects.settled().filter(pk=self.pk).exists():
+                raise ValueError("A settled planned transaction can't be edited.")
+            self.version += 1
+            super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
         if self.is_settled:
