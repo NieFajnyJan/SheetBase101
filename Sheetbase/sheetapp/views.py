@@ -34,7 +34,7 @@ from .models import (
 )
 from .payments import PlanChanged, cancel_effects, plan_payment, record_payment
 from .splits import save_split
-from .summary import all_time_summary, year_summary
+from .summary import all_time_summary, month_by_month, year_summary
 
 
 def corrections():
@@ -359,4 +359,6 @@ def summary(request):
     return render(request, "sheetapp/summary.html", {
         "all_time": all_time_summary(),
         "summaries": [year_summary(today.year), year_summary(today.year - 1)],
+        "months": month_by_month(today.year),
+        "this_year": today.year,
     })

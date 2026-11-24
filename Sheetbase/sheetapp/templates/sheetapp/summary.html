@@ -23,6 +23,7 @@
   .all-time { background: #eef2fb; border-color: #5b78c7; }
   .this-year { background: #ecf7ef; border-color: #4f9d69; }
   .last-year { background: #fbf4e6; border-color: #c99a3c; }
+  .month-by-month { background: #f3f4f7; border-color: #8a93a6; }
 </style>
 {% endblock %}
 
@@ -34,7 +35,9 @@
   <section class="period all-time">
     <h2>All time</h2>
     <p class="muted">Each member counted from their own first transaction. Months = complete months from then to the
-      latest transaction in the app. Per month = |total spent| ÷ months, shown once a full month has passed.</p>
+      latest transaction in the app. Per month = |total spent| ÷ months, shown once a full month has passed.
+      It's the size of the monthly average, without its sign: spending 50 zł a month and getting 50 zł back
+      a month both show as 50 zł – Total spent tells which it is.</p>
     <div class="table-wrap">
       <table>
         <thead>
@@ -82,7 +85,8 @@
       <table>
         <thead>
           <tr><th>Member</th><th class="num">Purchases</th><th class="num">Returns</th>
-              <th class="num">Paid to members</th><th class="num">Received from members</th></tr>
+              <th class="num">Paid to members</th><th class="num">Received from members</th>
+              <th class="num">Total spent</th></tr>
         </thead>
         <tbody>
           {% for r in s.rows %}
@@ -92,12 +96,14 @@
               <td class="num{% if not r.returns %} zero{% endif %}">{{ r.returns|zl }}</td>
               <td class="num{% if not r.paid %} zero{% endif %}">{{ r.paid|zl }}</td>
               <td class="num{% if not r.received %} zero{% endif %}">{{ r.received|zl }}</td>
+              <td class="num{% if not r.total_spent %} zero{% endif %}"><strong>{{ r.total_spent|zl }}</strong></td>
             </tr>
           {% endfor %}
         </tbody>
         <tfoot>
           <tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td>
-              <td class="num">{{ s.paid|zl }}</td><td class="num">{{ s.received|zl }}</td></tr>
+              <td class="num">{{ s.paid|zl }}</td><td class="num">{{ s.received|zl }}</td>
+              <td class="num">{{ s.total_spent|zl }}</td></tr>
         </tfoot>
       </table>
     </div>
@@ -129,4 +135,21 @@
     {% include "sheetapp/_between_shops.html" %}
   </section>
   {% endfor %}
+
+  <section class="period month-by-month">
+    <h2>Month by month</h2>
+    <p class="muted">What was spent on shops each month: purchases minus returns.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Month</th><th class="num">{{ this_year }}</th><th class="num">{{ this_year|add:"-1" }}</th></tr></thead>
+        <tbody>
+          {% for name, now, before in months %}
+            <tr><td>{{ name }}</td>
+              <td class="num{% if not now %} zero{% endif %}">{% if now is None %}–{% else %}{{ now|zl }}{% endif %}</td>
+              <td class="num{% if not before %} zero{% endif %}">{{ before|zl }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
 {% endblock %}

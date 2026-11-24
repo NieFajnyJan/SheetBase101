@@ -1085,6 +1085,28 @@ class YearlySummaryTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Planned transactions
+    def test_year_tables_show_total_spent(self):
+        self.make("100.00", self.jan, self.shop, self.d(self.this_year, 1))
+        self.make("30.00", self.shop, self.jan, self.d(self.this_year, 1))
+        page = self.client.get(self.url)
+        self.assertEqual(self.row(page.context["summaries"][0], self.jan).total_spent, Decimal("70.00"))
+        self.assertContains(page, "<th class=\"num\">Total spent</th>", count=2)
+
+    def test_month_by_month_compares_with_last_year(self):
+        self.make("100.00", self.jan, self.shop, self.d(self.this_year, 1))
+        self.make("30.00", self.shop, self.ola, self.d(self.this_year, 1))
+        self.make("40.00", self.jan, self.ola, self.d(self.this_year, 1))  # between members: not spent
+        self.make("50.00", self.ola, self.shop, self.d(self.this_year - 1, 3))
+        months = self.client.get(self.url).context["months"]
+        self.assertEqual(months[0][1:], (Decimal("70.00"), Decimal("0.00")))
+        self.assertEqual(months[2][2], Decimal("50.00"))
+        self.assertEqual(len(months), 12)
+
+    def test_months_still_to_come_are_left_empty(self):
+        months = self.client.get(self.url).context["months"]
+        self.assertEqual([m[1] is None for m in months], [m > today().month for m in range(1, 13)])
+
+
 class PlannedTransactionTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
