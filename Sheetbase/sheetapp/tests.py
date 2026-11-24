@@ -2133,8 +2133,35 @@ class PlannedPageTests(TestCase):
         pay = Transaction.objects.create(amount=Decimal("10.00"), payer=self.ola, recipient=self.jan,
                                          created_by=self.jan, description="Zwrot")
         d = self.debt(settled_by=pay, settled_at=timezone.now())
-        self.assertEqual(self.client.get(self.edit_url(d)).status_code, 403)
-        self.assertEqual(self.client.post(self.delete_url(d)).status_code, 403)
+        page = self.client.get(self.edit_url(d), follow=True)
+        self.assertRedirects(page, self.url)
+        self.assertContains(page, "This planned transaction has been paid in the meantime")
+        page = self.client.post(self.delete_url(d), follow=True)
+        self.assertContains(page, "Nothing was deleted. This planned transaction has been paid")
+        self.assertTrue(PlannedTransaction.objects.filter(pk=d.pk).exists())
+
+    def test_edit_of_a_debt_deleted_in_another_tab_goes_back_with_a_warning(self):
+        d = self.debt()
+        url = self.edit_url(d)
+        self.client.get(url)  # the edit page is open...
+        d.delete()  # ...when it's deleted in another tab
+        page = self.client.post(url, {"debtor": self.ola.pk, "creditor": self.jan.pk,
+                                                   "amount": "12,50", "description": "Pizza"}, follow=True)
+        self.assertRedirects(page, self.url)
+        self.assertContains(page, '<p class="msg msg-warning" role="alert">Nothing was saved. This planned '
+                                  'transaction was deleted in the meantime')
+        self.assertFalse(PlannedTransaction.objects.exists())
+        # Opening it from an old page says so too, without "Nothing was saved".
+        page = self.client.get(url, follow=True)
+        self.assertContains(page, "role=\"alert\">This planned transaction was deleted in the meantime")
+
+    def test_deleting_twice_goes_back_with_a_warning(self):
+        d = self.debt()
+        shown = self.shown_rows(d)  # the Delete page open in two tabs
+        self.client.post(self.delete_url(d), {"rows": shown})
+        page = self.client.post(self.delete_url(d), {"rows": shown}, follow=True)
+        self.assertRedirects(page, self.url)
+        self.assertContains(page, "Nothing was deleted. This planned transaction was deleted in the meantime")
 
     def test_delete_takes_the_group(self):
         a, b = self.debt(), self.debt(debtor=self.ewa)
@@ -2333,6 +2360,18 @@ class MarkPaidTests(TestCase):
         self.assertEqual(self.client.get(self.pay_url(d)).status_code, 403)
         self.assertEqual(self.client.post(self.pay_url(d), self.data(d)).status_code, 403)
         self.assertEqual(self.client.get(f"{self.url}?pay=abc").status_code, 404)
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_mark_paid_on_a_deleted_debt_goes_back_with_a_warning(self):
+        d = self.debt()
+        url, data = self.pay_url(d), self.data(d, confirm="")
+        self.client.force_login(self.ola)
+        d.delete()
+        page = self.client.get(url, follow=True)
+        self.assertRedirects(page, reverse("planned"))
+        self.assertContains(page, "This planned transaction was deleted in the meantime")
+        page = self.client.post(url, data, follow=True)
+        self.assertContains(page, "Nothing was saved. This planned transaction was deleted")
         self.assertFalse(Transaction.objects.exists())
 
     def test_admin_marks_selected_paid_one_payment_per_pair(self):
