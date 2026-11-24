@@ -119,6 +119,7 @@ def transactions(request):
         "shop_form": shop_form,
         "filter_form": filter_form,
         "filters_valid": valid,
+        "kept_ticks": kept_ticks(request),
         "filtered": any(request.GET.get(f) for f in filter_form.fields),
         "transactions": done if valid else [],
         # Corrected amounts; cancelled ones count 0.
@@ -159,8 +160,12 @@ def confirm_payment(request, form, payment, paying=None):
     # On the screen itself the ticks decide (none ticked is a valid choice); arriving from the form,
     # it's the debt being marked paid, or the debts are picked automatically.
     chosen = {paying.pk} if paying else None
+    ticked = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
     if "choosing" in request.POST:
-        chosen = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
+        chosen = ticked
+    elif request.POST.get("ticked_for") == ticks_key(payment):
+        # Back to the form and Add again: the ticks made before, as long as it's between the same people.
+        chosen = ticked | (chosen or set())
     plan = None
     changed_debts, leftover_changed = set(), False  # what differs from the screen Confirm was clicked on
     problem = paying and "confirm" in request.POST and mark_paid_problem(paying, payment, chosen)
@@ -184,9 +189,21 @@ def confirm_payment(request, form, payment, paying=None):
             return redirect("planned" if paying else request.get_full_path())
     plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
     return render(request, "sheetapp/confirm_payment.html", {
-        "form": form, "payment": payment, "plan": plan, "paying": paying,
+        "form": form, "payment": payment, "plan": plan, "paying": paying, "ticks_key": ticks_key(payment),
         "changed_debts": changed_debts, "leftover_changed": leftover_changed,
     })
+
+
+def ticks_key(payment):
+    """Which two people ticked debts belong to: kept over Back only while the payment is between them."""
+    return f"{payment.payer_id}-{payment.recipient_id}"
+
+
+def kept_ticks(request):
+    """Back from the payment confirmation: the debts ticked there, to send along with the form again."""
+    if "back" not in request.POST or "choosing" not in request.POST:
+        return None
+    return {"debts": request.POST.getlist("debts"), "key": request.POST.get("ticked_for", "")}
 
 
 def confirm_split(request, form, purchase=None):
