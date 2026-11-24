@@ -12,7 +12,6 @@ from django.utils.text import slugify
 
 from .models import (
     CORRECTABLE_FIELDS,
-    MAX_YEARS_BACK,
     PlannedTransaction,
     Transaction,
     TransactionCorrection,
@@ -125,6 +124,9 @@ class CorrectionForm(UpToDateMixin, TransactionForm):
         self.instance.original = original
         self.instance.version = self.current.version + 1  # replaces the version checked here
         self.add_shown_field(self.current, CORRECTABLE_FIELDS)
+        # A date older than the usual limit may stay as it is (see TransactionCorrection.clean_fields).
+        attrs = self.fields["date"].widget.attrs
+        attrs["data-min"] = min(attrs["data-min"], self.current.date.isoformat())
         # The loan this payment made, if it was changed on the Planned page since: correcting what was
         # changed there too then needs a choice – does the loan follow the correction or keep its own value?
         self.loan, self.loan_edits = loan_edits(original)
@@ -363,18 +365,27 @@ class HistoryFilterForm(forms.Form):
                                    choices=[("", "whole year")] + MONTHS)
     hide_cancelled = forms.BooleanField(required=False, label="hide cancelled")
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, years=(), **kwargs):
+        """`years`: the years transactions are dated in; this year is always offered."""
         super().__init__(*args, **kwargs)
-        # Transactions can only be dated this year or MAX_YEARS_BACK years before.
-        this_year = timezone.localdate().year
-        self.fields["year"].choices = [("", "any")] + [
-            (y, y) for y in range(this_year, this_year - MAX_YEARS_BACK - 1, -1)]
+        years = sorted({timezone.localdate().year, *years}, reverse=True)
+        self.fields["year"].choices = [("", "any")] + [(y, y) for y in years]
 
     def clean(self):
         data = super().clean()
         if data.get("month") and not data.get("year"):
             self.add_error("year", "Pick a year for the month.")
         return data
+
+    def applied(self):
+        """The filters in use, in words: ["paid by Ola", "November 2026", "cancelled hidden"]."""
+        data = self.cleaned_data
+        words = [f"{self.fields[n].label} {data[n]}" for n in ("payer", "recipient") if data.get(n)]
+        if data.get("year"):
+            words.append(f"{dict(MONTHS)[data['month']]} {data['year']}" if data.get("month") else str(data["year"]))
+        if data.get("hide_cancelled"):
+            words.append("cancelled hidden")
+        return words
 
     def filter(self, transactions):
         """Expects Transaction.objects.with_current(): filters on current (corrected) values."""

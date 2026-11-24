@@ -272,6 +272,12 @@ class TransactionCorrection(models.Model):
         what = "Cancelled" if self.cancelled else "Corrected"
         return f"{what}: {self.date:%d.%m.%Y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
 
+    def clean_fields(self, exclude=None):
+        # An old date may stay: correcting the amount of a transaction older than MAX_YEARS_BACK keeps its date.
+        if self.original_id and self.date == self.original.current.date:
+            exclude = {*(exclude or ()), "date"}
+        super().clean_fields(exclude)
+
     def clean(self):
         if not self.original_id:
             return

@@ -20,8 +20,10 @@
     .forms > .form-card, .forms > .side { grid-column: 1; max-width: none; }
   }
   h2.section { margin: 2rem 0 .5rem; }
+  #done { scroll-margin-top: 1rem; }
   .filters { display: flex; flex-wrap: wrap; gap: .8rem; align-items: end; margin-bottom: 1rem; }
   .card.filters p { margin: 0; min-width: 150px; }
+  .filter-note { margin: -.4rem 0 1rem; }
   .filters .toggle { display: flex; align-items: center; gap: .4rem; font-weight: 400; margin: 0; padding-bottom: .55rem; cursor: pointer; }
   .table-wrap { overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
@@ -82,17 +84,23 @@
     </div>
   </div>
 
-  <h2 class="section">Done transactions</h2>
+  <h2 class="section" id="done">Done transactions</h2>
 
-  <form class="card filters" method="get">
+  {# Filtering comes back to this list, not to the top of the page. #}
+  <form class="card filters" method="get" action="{% url 'transactions' %}#done">
     {% for field in filter_form %}{% if field.name != "hide_cancelled" %}
       <p>{{ field.label_tag }} {{ field }}{{ field.errors }}</p>
     {% endif %}{% endfor %}
     <button class="btn">Filter</button>
     {# Applies straight away – no need to press Filter. #}
     <label class="toggle">{{ filter_form.hide_cancelled }} Hide cancelled</label>
-    {% if filtered %}<a href="{% url 'transactions' %}">Clear</a>{% endif %}
+    {% if filtered %}<a href="{% url 'transactions' %}#done">Clear</a>{% endif %}
   </form>
+  {% if not filters_valid %}
+    <p class="card filter-note"><strong>Nothing shown:</strong> a filter above can't be used – fix it or click Clear.</p>
+  {% elif filtered %}
+    <p class="filter-note">Showing: {{ filter_form.applied|join:" · "|default:"everything" }}</p>
+  {% endif %}
 
   {% if transactions %}
     <div class="table-wrap">
@@ -147,6 +155,7 @@
         <tfoot><tr><td colspan="4">Total</td><td class="num">{{ total|zl }}</td><td colspan="3"></td></tr></tfoot>
       </table>
     </div>
+  {% elif not filters_valid %}
   {% elif filtered %}
     <p class="card muted">No transactions match these filters.</p>
   {% else %}
