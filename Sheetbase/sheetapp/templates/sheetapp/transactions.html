@@ -109,7 +109,7 @@
                 {% elif t.is_corrected %}<button type="button" class="tag" aria-controls="history-{{ t.pk }}">corrected ×{{ t.corrections.all|length }}</button>{% endif %}
                 {% if paid_for %}
                   <div class="paid-for">Paid for:
-                    {% for d in paid_for %}{% if d.source_id %}<a href="{% url 'transactions' %}#t-{{ d.source_id }}">{{ d.description }}</a>{% else %}{{ d.description }}{% endif %} {{ d.amount|zl }}{% if not forloop.last %}; {% endif %}{% endfor %}
+                    {% for a in paid_for %}{% with d=a.debt %}{% if d.source_id %}<a href="{% url 'transactions' %}#t-{{ d.source_id }}">{{ d.description }}</a>{% else %}{{ d.description }}{% endif %} {% if a.owed %}{{ a.paid|zl }} of {{ d.amount|zl }} – {{ a.owed|zl }} still owed{% else %}{{ d.amount|zl }}{% endif %}{% if not forloop.last %}; {% endif %}{% endwith %}{% endfor %}
                   </div>
                 {% endif %}
                 {% if c.payer.is_shop and c.recipient.is_shop and not t.is_cancelled %}

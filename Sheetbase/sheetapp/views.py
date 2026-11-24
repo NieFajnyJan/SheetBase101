@@ -30,7 +30,7 @@ from .models import (
     rows_signature,
     save_once,
 )
-from .payments import PlanChanged, plan_payment, record_payment
+from .payments import PlanChanged, cancel_effects, plan_payment, record_payment
 from .splits import save_split
 from .summary import all_time_summary, year_summary
 
@@ -235,6 +235,7 @@ def _change_transaction(request, pk, *, cancelling):
             return redirect("transactions")
     return render(request, "sheetapp/correct.html", {
         "form": form, "transaction": transaction, "cancelling": cancelling,
+        "effects": cancel_effects(transaction) if cancelling else None,
     })
 
 
