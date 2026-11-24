@@ -795,7 +795,7 @@ class CorrectionTests(TestCase):
         self.assertRedirects(self.correct(amount="12,49", shown=self.shown(self.correct_url)), self.list_url)
         # The old tab only fixes the description, but still holds the old amount.
         page = self.correct(description="Kawa i ciastko", shown=old)
-        self.assertContains(page, "Changed after you opened this page: amount (now 12,49\xa0zł). Nothing was saved")
+        self.assertContains(page, "Nothing was saved. It changed after you opened this page: amount (now 12,49\xa0zł)")
         self.assertEqual(TransactionCorrection.objects.count(), 1)
         form = page.context["form"]
         self.assertEqual(Decimal(form["amount"].value()), Decimal("12.49"))  # the newer amount, not the old one
@@ -819,7 +819,7 @@ class CorrectionTests(TestCase):
         old = self.shown(self.cancel_url)
         self.correct(amount="12,49", shown=self.shown(self.correct_url))
         page = self.client.post(self.cancel_url, {"reason": "never happened", "shown": old})
-        self.assertContains(page, "Changed after you opened this page: amount (now 12,49\xa0zł)")
+        self.assertContains(page, "Nothing was saved. It changed after you opened this page: amount (now 12,49\xa0zł)")
         self.assertFalse(self.row().is_cancelled)
         self.assertRedirects(self.client.post(self.cancel_url, {"reason": "never happened",
                                                                 "shown": page.context["form"]["shown"].value()}),
@@ -1746,6 +1746,20 @@ class PayingDebtsTests(TestCase):
         self.assertEqual(screen.context["plan"].chosen, {a.pk})  # picked automatically, oldest first
 
     # --- Messages
+
+    def test_a_warning_looks_different_and_says_nothing_was_saved(self):
+        d = self.debt("90.00")
+        page = self.confirm_after(lambda: edit(d, amount=Decimal("80.00")), "90.00")
+        self.assertContains(page, '<p class="msg msg-warning" role="alert">Nothing was saved.')
+
+    def test_success_says_it_was_saved(self):
+        self.debt("30.00")
+        screen = self.client.post(self.url, self.data("30.00"))
+        page = self.client.post(self.url, self.data("30.00", confirm="", plan=screen.context["plan"].signature()),
+                                follow=True)
+        self.assertContains(page, '<p class="msg msg-success" role="status">Saved. Added:')
+
+
 class GroupRestsMigrationTests(TestCase):
     """Rests added before they kept their debt's group join it when migrating, written to the audit log."""
 
@@ -2057,7 +2071,7 @@ class PlannedPageTests(TestCase):
                              self.url)
         self.client.force_login(self.jan)  # jan's old page only fixes the description
         page = self.client.post(self.edit_url(d), {**fields, "description": "Pizza duża", "shown": old})
-        self.assertContains(page, "Changed after you opened this page: amount (now 40,00\xa0zł). Nothing was saved")
+        self.assertContains(page, "Nothing was saved. It changed after you opened this page: amount (now 40,00\xa0zł)")
         d.refresh_from_db()
         self.assertEqual((d.amount, d.description), (Decimal("40.00"), "Pizza"))
         form = page.context["form"]

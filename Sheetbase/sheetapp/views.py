@@ -68,7 +68,7 @@ def transactions(request):
     with their total, optionally filtered."""
     paying = debt_to_mark_paid(request)
     if paying and paying.is_settled:  # e.g. Confirm clicked twice: the first click already paid it
-        messages.info(request, f"Already paid: {paying}")
+        messages.info(request, f"Nothing was saved. Already paid: {paying}")
         return redirect("planned")
     if paying:  # Mark paid: the payment filled in from the debt
         details = {"payer": paying.debtor.pk, "recipient": paying.creditor.pk, "amount": str(paying.amount),
@@ -88,7 +88,7 @@ def transactions(request):
     if request.method == "POST" and "add_shop" in request.POST:
         shop_form = ShopForm(request.POST)
         if shop_form.is_valid():
-            messages.success(request, f"Added shop: {shop_form.save()}")
+            messages.success(request, f"Saved. Added shop: {shop_form.save()}")
             return redirect(request.get_full_path())  # keeps the current filters
     elif request.method == "POST":
         form = AddTransactionForm(request.POST, paying=paying)
@@ -101,9 +101,9 @@ def transactions(request):
                 try:
                     save_once(Transaction, obj.submission, obj.save)
                 except AlreadyAdded as e:  # e.g. Add clicked twice
-                    messages.info(request, f"Already added: {e.record}")
+                    messages.info(request, f"Not saved again. Already added: {e.record}")
                 else:
-                    messages.success(request, f"Added: {obj}")
+                    messages.success(request, f"Saved. Added: {obj}")
                 return redirect(request.get_full_path())
             return confirm_payment(request, form, obj, paying)
 
@@ -171,22 +171,22 @@ def confirm_payment(request, form, payment, paying=None):
     changed_debts, leftover_changed = set(), False  # what differs from the screen Confirm was clicked on
     problem = paying and "confirm" in request.POST and mark_paid_problem(paying, payment, chosen)
     if problem:
-        messages.error(request, problem)
+        messages.error(request, f"Not saved. {problem}")
     elif "confirm" in request.POST:
         try:
             # Once the first click has paid the debts, the plan differs too: then it's AlreadyAdded.
             save_once(Transaction, payment.submission, lambda: record_payment(
                 payment, chosen=chosen, expected_signature=request.POST.get("plan", "")), also=(PlanChanged,))
         except AlreadyAdded as e:  # e.g. Confirm clicked twice
-            messages.info(request, f"Already added: {e.record}")
+            messages.info(request, f"Not saved again. Already added: {e.record}")
             return redirect("planned" if paying else request.get_full_path())
         except PlanChanged as changed:
             plan = changed.plan
             changed_debts, leftover_changed = plan.changes_since(request.POST.get("plan", ""))
-            messages.warning(request, "What this payment covers has changed – please check it again. "
-                                      "Nothing was saved.")
+            messages.warning(request, "Nothing was saved. What this payment covers has changed since you "
+                                      "saw it – please check it again.")
         else:
-            messages.success(request, f"Added: {payment}")
+            messages.success(request, f"Saved. Added: {payment}")
             return redirect("planned" if paying else request.get_full_path())
     plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
     return render(request, "sheetapp/confirm_payment.html", {
@@ -215,10 +215,10 @@ def confirm_split(request, form, purchase=None):
         try:
             shares = save_split(plan, request.user, purchase)
         except AlreadyAdded:  # e.g. Confirm clicked twice
-            messages.info(request, "This split was already added.")
+            messages.info(request, "Not saved again. This split was already added.")
         else:
             added = f"{purchase} and " if purchase else ""
-            messages.success(request, f"Added: {added}{len(shares)} planned transaction{'s' if len(shares) != 1 else ''}"
+            messages.success(request, f"Saved. Added: {added}{len(shares)} planned transaction{'s' if len(shares) != 1 else ''}"
                                       f" owed to {plan.creditor}.")
         return redirect(request.get_full_path())
     return render(request, "sheetapp/confirm_split.html", {"form": form, "plan": plan, "purchase": purchase})
@@ -255,7 +255,7 @@ def _change_transaction(request, pk, *, cancelling):
         except ValidationError as e:  # a related debt may have been paid after form validation
             form.add_error(None, e)
         else:
-            messages.success(request, str(correction))
+            messages.success(request, f"Saved. {correction}")
             return redirect("transactions")
     return render(request, "sheetapp/correct.html", {
         "form": form, "transaction": transaction, "cancelling": cancelling,
@@ -275,9 +275,9 @@ def planned(request):
         try:
             save_once(PlannedTransaction, debt.submission, debt.save)
         except AlreadyAdded as e:  # e.g. Add clicked twice
-            messages.info(request, f"Already added: {e.record}")
+            messages.info(request, f"Not saved again. Already added: {e.record}")
         else:
-            messages.success(request, f"Added: {debt}")
+            messages.success(request, f"Saved. Added: {debt}")
         return redirect("planned")
     debts = (PlannedTransaction.objects.open().select_related("debtor", "creditor", "source")
              .prefetch_related("source__corrections"))
@@ -321,7 +321,7 @@ def edit_planned(request, pk):
         except ValidationError as e:  # changed by someone else at the same moment
             form.add_error(None, e)
         else:
-            messages.success(request, f"Saved: {saved}")
+            messages.success(request, f"Saved. Changed: {saved}")
             return redirect("planned")
     return render(request, "sheetapp/planned_edit.html", {"form": form})
 
@@ -341,8 +341,8 @@ def delete_planned(request, pk):
             deleted = this.delete_with_groups(expected=shown)[0]
         except GroupChanged:  # someone changed the group or a row in it after the page was opened
             changed = changed_rows(rows, shown)
-            messages.warning(request, "What would be deleted changed after you opened this page – check it "
-                                      "and delete again. Nothing was deleted.")
+            messages.warning(request, "Nothing was deleted. What would be deleted changed after you opened "
+                                      "this page – check it and delete again.")
         except ValidationError as e:  # someone paid in the meantime
             problems = e.messages
         else:

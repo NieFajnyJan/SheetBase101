@@ -24,7 +24,10 @@
     .btn-social:hover { background: #f3f3f3; }
     .divider { display: flex; align-items: center; gap: .6rem; color: #999; font-size: .9rem; }
     .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid #e3e3e3; }
-    .msg { background: #e6f4ea; border-radius: 6px; padding: .6rem 1rem; }
+    .msg { background: #e6f4ea; border-radius: 6px; border-left: 5px solid #1e7a3c; padding: .6rem 1rem; }
+    .msg-info { background: #e8eef9; border-color: #2b5bb5; }
+    .msg-warning { background: #fff4e0; border-color: #a05a00; }
+    .msg-error { background: #fde8ea; border-color: #b00020; }
     .muted { color: #777; }
     .switch { display: block; font-weight: 600; color: #2b3a55; text-decoration: none; margin-bottom: 1rem; }
     .switch:hover { background: #f3f4f7; }
@@ -47,7 +50,8 @@
     {% endif %}
   </header>
   <main>
-    {% for message in messages %}<p class="msg">{{ message }}</p>{% endfor %}
+    {# Success green, information blue, warnings amber, errors red; warnings and errors are read out at once. #}
+    {% for message in messages %}<p class="msg msg-{{ message.level_tag }}" role="{% if message.level_tag == "warning" or message.level_tag == "error" %}alert{% else %}status{% endif %}">{{ message }}</p>{% endfor %}
     {% block content %}{% endblock %}
   </main>
   <script>
