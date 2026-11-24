@@ -518,8 +518,8 @@ class PlannedTransaction(models.Model):
             bumped = (PlannedTransaction._base_manager.filter(pk=self.pk, version=self.version)
                       .update(version=F("version") + 1))
             if not bumped:
-                raise ValidationError("Nothing was saved. This debt was changed or paid by someone else at the "
-                                      "same moment – open it again to see what it is now.")
+                raise ValidationError("Nothing was saved. This debt was changed, paid or deleted by someone else "
+                                      "at the same moment – open it again to see what it is now.")
             if PlannedTransaction.objects.settled().filter(pk=self.pk).exists():
                 raise ValueError("A settled planned transaction can't be edited.")
             self.version += 1

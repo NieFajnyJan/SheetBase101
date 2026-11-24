@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal
+from functools import wraps
 
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
@@ -37,6 +38,21 @@ from .splits import save_split
 from .summary import all_time_summary, month_by_month, year_summary
 
 
+class DebtGone(Exception):
+    """The debt a page is about was deleted or paid since it was opened, e.g. in another tab."""
+
+
+def back_to_planned_if_gone(view):
+    """When the debt is gone (DebtGone), back to the Planned page, where the warning shows."""
+    @wraps(view)
+    def wrapper(request, *args, **kwargs):
+        try:
+            return view(request, *args, **kwargs)
+        except DebtGone:
+            return redirect("planned")
+    return wrapper
+
+
 def corrections():
     return Prefetch("corrections", queryset=TransactionCorrection.objects.select_related(
         "payer", "recipient", "created_by"))
@@ -63,6 +79,7 @@ def login_page(request):
 
 
 @login_required
+@back_to_planned_if_gone
 def transactions(request):
     """One page: add a done transaction, add a missing shop, and see all done transactions
     with their total, optionally filtered."""
@@ -135,7 +152,9 @@ def debt_to_mark_paid(request):
         return None
     if not pk.isdigit():
         raise Http404
-    debt = get_object_or_404(PlannedTransaction.objects.select_related("debtor", "creditor"), pk=pk)
+    debt = PlannedTransaction.objects.select_related("debtor", "creditor").filter(pk=pk).first()
+    if debt is None:
+        open_debt(request, pk)  # deleted: warns and goes back to Planned
     if not debt.can_be_marked_paid_by(request.user):
         raise PermissionDenied("Only the person who owes or is owed the money can mark it as paid.")
     return debt
@@ -303,17 +322,23 @@ def balances(debts, user, side):
     return rows, sum((amount for _, amount in rows), Decimal("0.00"))
 
 
-def open_debt(pk):
-    """The planned transaction, while it's open: any member may edit or delete it then. Once paid, 403."""
-    debt = get_object_or_404(PlannedTransaction, pk=pk)
-    if debt.is_settled:
-        raise PermissionDenied("This debt has been paid, so it can't be changed any more.")
+def open_debt(request, pk, nothing_done="Nothing was saved."):
+    """The planned transaction, while it's open: any member may edit, delete or pay it then. Deleted or
+    paid already: warns and raises DebtGone. `nothing_done` starts the warning when something was sent."""
+    debt = PlannedTransaction.objects.select_related("debtor", "creditor").filter(pk=pk).first()
+    if debt is None or debt.is_settled:
+        what = "was deleted" if debt is None else "has been paid"
+        start = f"{nothing_done} " if request.method == "POST" else ""
+        messages.warning(request, f"{start}This planned transaction {what} in the meantime (maybe in another tab), "
+                                  "so it can't be changed any more.")
+        raise DebtGone
     return debt
 
 
 @login_required
+@back_to_planned_if_gone
 def edit_planned(request, pk):
-    debt = open_debt(pk)
+    debt = open_debt(request, pk)
     form = EditPlannedForm(request.POST or None, instance=debt)
     if request.method == "POST" and form.is_valid():
         try:
@@ -327,9 +352,10 @@ def edit_planned(request, pk):
 
 
 @login_required
+@back_to_planned_if_gone
 def delete_planned(request, pk):
     """Deleting is only for mistakes; it takes the whole group with it. Paying goes through a payment."""
-    debt = open_debt(pk)
+    debt = open_debt(request, pk, nothing_done="Nothing was deleted.")
     this = PlannedTransaction.objects.filter(pk=debt.pk)
     rows = list(this.with_groups().select_related("debtor", "creditor"))
     # Refused when someone in the group already paid.
