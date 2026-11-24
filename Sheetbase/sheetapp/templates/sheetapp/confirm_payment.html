@@ -9,6 +9,7 @@
   .covers li { border-bottom: 1px dashed #dde; }
   .covers label { display: flex; align-items: baseline; gap: .6rem; font-weight: 400; margin: 0; padding: .4rem 0; cursor: pointer; }
   .covers .what { flex: 1; }
+  .covers .origin { display: block; font-size: .85rem; color: #666; }
   .covers .status { display: block; min-height: 1.3em; font-size: .85rem; color: #777; }
   .covers .status.paid { color: #1e7a3c; }
   .covers .status.partly, .covers .status.ran_out { color: #a05a00; }
@@ -29,9 +30,10 @@
     {% for field in form %}{{ field.as_hidden }}{% endfor %}
     <input type="hidden" name="plan" value="{{ plan.signature }}">
     <input type="hidden" name="choosing" value="1">
+    <input type="hidden" name="ticked_for" value="{{ ticks_key }}">
 
     <h2>Confirm payment</h2>
-    <p><strong>{{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
+    <p><strong>{{ payment.date|day }} · {{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
     {% if plan.debts %}
       {% if paying %}
@@ -50,6 +52,9 @@
               <input type="checkbox" name="debts" value="{{ debt.pk }}"{% if ticked %} checked{% endif %}>
             {% endif %}
             <span class="what">{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}
+              {# Two debts can read the same: when it was added and the purchase it came from tell them apart. #}
+              <span class="origin">added {{ debt.created_at|day }}{% if debt.source_id %} · from the purchase
+                “{{ debt.source.current.description }}” of {{ debt.source.current.date|day }}{% endif %}</span>
               {% if status == "paid" %}<span class="status paid">paid</span>
               {% elif status == "partly" %}<span class="status partly">paid, but {{ plan.leftover.amount|zl }} of it stays owed</span>
               {% elif status == "ran_out" %}<span class="status ran_out">not paid – the money ran out</span>

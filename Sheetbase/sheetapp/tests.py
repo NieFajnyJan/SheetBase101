@@ -1695,6 +1695,35 @@ class PayingDebtsTests(TestCase):
         self.assertContains(page, "added by jan")
 
     # --- The confirmation screen
+
+    def test_confirmation_shows_the_date_and_where_each_debt_came_from(self):
+        purchase = Transaction.objects.create(amount=Decimal("60.00"), payer=self.jan, recipient=self.shop,
+                                              description="Pizza", created_by=self.jan, date=today())
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("30.00"),
+                                          description="Pizza", source=purchase, created_by=self.jan)
+        self.debt("30.00", description="Pizza")
+        screen = self.client.post(self.url, self.data("60.00"))
+        self.assertContains(screen, f"{today():%d.%m.%Y}</time> · ola → jan")
+        self.assertContains(screen, "from the purchase", count=1)
+        self.assertContains(screen, "added <time", count=2)
+
+    def test_ticks_are_kept_when_going_back_to_the_form(self):
+        a, b = self.debt("30.00"), self.debt("50.00")
+        key = f"{self.ola.pk}-{self.jan.pk}"
+        form = self.choose("50.00", [b], button="back", ticked_for=key)
+        self.assertTemplateUsed(form, "sheetapp/transactions.html")
+        self.assertContains(form, f'<input type="hidden" name="debts" value="{b.pk}">')
+        screen = self.client.post(self.url, self.data("50.00", ticked_for=key, debts=[b.pk]))
+        self.assertEqual(screen.context["plan"].chosen, {b.pk})
+
+    def test_ticks_are_dropped_when_the_people_change(self):
+        a = self.debt("30.00", debtor=self.ewa)
+        b = self.debt("50.00", debtor=self.ewa)
+        screen = self.client.post(self.url, self.data("30.00", payer=self.ewa,
+                                                      ticked_for=f"{self.ola.pk}-{self.jan.pk}", debts=[b.pk]))
+        self.assertEqual(screen.context["plan"].chosen, {a.pk})  # picked automatically, oldest first
+
+    # --- Messages
 class GroupRestsMigrationTests(TestCase):
     """Rests added before they kept their debt's group join it when migrating, written to the audit log."""
 

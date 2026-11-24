@@ -24,7 +24,7 @@
 
     <h2>Confirm split</h2>
     {% if purchase %}
-      <p><strong>{{ purchase.payer }} → {{ purchase.recipient }} · {{ purchase.description }} · {{ purchase.amount|zl }}</strong></p>
+      <p><strong>{{ purchase.date|day }} · {{ purchase.payer }} → {{ purchase.recipient }} · {{ purchase.description }} · {{ purchase.amount|zl }}</strong></p>
     {% else %}
       <p><strong>{{ plan.description }}</strong>{% if plan.tag %} <span class="muted">({{ plan.tag }})</span>{% endif %}</p>
     {% endif %}
