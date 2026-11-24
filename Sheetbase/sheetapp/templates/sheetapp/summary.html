@@ -13,8 +13,14 @@
   th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
   th { background: #f3f4f7; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .zero { color: #bbb; }
-  tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
+  .zero { color: var(--muted); }
+  tfoot td, tfoot th { font-weight: 700; border-top: 2px solid #ccc; }
+  tfoot th { background: #fff; }
+  /* Long column names ("Received from members") take two lines, so the all-time table fits on a laptop. */
+  thead th { white-space: normal; vertical-align: bottom; }
+  /* The names stay in view while the rest of a wide table scrolls sideways (on a phone). */
+  tr > :first-child { position: sticky; left: 0; z-index: 1; }
+  tr > td:first-child { background: #fff; }
   .totals { margin: .6rem 0 0; }
   h3 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
   /* Each period has its own soft colour, so it's clear which year a table belongs to. */
@@ -29,27 +35,28 @@
 
 {% block content %}
   <h1>Yearly summary</h1>
-  <p class="muted">Done transactions only, with corrections applied; cancelled ones don't count.</p>
+  <p class="muted">Done transactions only, with corrections applied; cancelled ones don't count.
+    <strong>Total spent</strong> = purchases − returns + paid to members − received from members.</p>
 
   {% with s=all_time %}
   <section class="period all-time">
-    <h2>All time</h2>
+    <h2 id="all-time">All time</h2>
     <p class="muted">Each member counted from their own first transaction. Months = complete months from then to the
       latest transaction in the app. Per month = |total spent| ÷ months, shown once a full month has passed.
       It's the size of the monthly average, without its sign: spending 50 zł a month and getting 50 zł back
       a month both show as 50 zł – Total spent tells which it is.</p>
     <div class="table-wrap">
-      <table>
+      <table aria-labelledby="all-time">
         <thead>
-          <tr><th>Member</th><th>Since</th><th class="num" title="Complete months from their first transaction to the latest one">Months</th><th class="num">Purchases</th>
+          <tr><th>Member</th><th>Since</th><th class="num">Months</th><th class="num">Purchases</th>
               <th class="num">Returns</th><th class="num">Paid to members</th><th class="num">Received from members</th>
-              <th class="num" title="|Total spent| ÷ months, rounded to grosze">Per month</th>
-              <th class="num" title="Purchases − returns + paid to members − received from members">Total spent</th></tr>
+              <th class="num">Per month</th>
+              <th class="num">Total spent</th></tr>
         </thead>
         <tbody>
           {% for r in s.rows %}
             <tr>
-              <td>{{ r.member }}</td>
+              <th scope="row">{{ r.member }}</th>
               {% if r.first_date %}
                 <td>{{ r.first_date|day }}</td><td class="num">{{ r.months }}</td>
               {% else %}
@@ -65,7 +72,7 @@
           {% endfor %}
         </tbody>
         <tfoot>
-          <tr><td colspan="3">Total</td><td class="num">{{ s.purchases|zl }}</td>
+          <tr><th scope="row" colspan="3">Total</th><td class="num">{{ s.purchases|zl }}</td>
               <td class="num">{{ s.returns|zl }}</td><td class="num">{{ s.paid|zl }}</td><td class="num">{{ s.received|zl }}</td>
               <td></td><td class="num">{{ s.total_spent|zl }}</td></tr>
         </tfoot>
@@ -80,9 +87,9 @@
   {% for s in summaries %}
   <section class="period {% if forloop.first %}this-year{% else %}last-year{% endif %}">
     <h2>{{ s.year }}{% if forloop.first %} (this year){% else %} (last year){% endif %}</h2>
-    <h3>Members in {{ s.year }}</h3>
+    <h3 id="members-{{ s.year }}">Members in {{ s.year }}</h3>
     <div class="table-wrap">
-      <table>
+      <table aria-labelledby="members-{{ s.year }}">
         <thead>
           <tr><th>Member</th><th class="num">Purchases</th><th class="num">Returns</th>
               <th class="num">Paid to members</th><th class="num">Received from members</th>
@@ -91,7 +98,7 @@
         <tbody>
           {% for r in s.rows %}
             <tr>
-              <td>{{ r.member }}</td>
+              <th scope="row">{{ r.member }}</th>
               <td class="num{% if not r.purchases %} zero{% endif %}">{{ r.purchases|zl }}</td>
               <td class="num{% if not r.returns %} zero{% endif %}">{{ r.returns|zl }}</td>
               <td class="num{% if not r.paid %} zero{% endif %}">{{ r.paid|zl }}</td>
@@ -101,27 +108,27 @@
           {% endfor %}
         </tbody>
         <tfoot>
-          <tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td>
+          <tr><th scope="row">Total</th><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td>
               <td class="num">{{ s.paid|zl }}</td><td class="num">{{ s.received|zl }}</td>
               <td class="num">{{ s.total_spent|zl }}</td></tr>
         </tfoot>
       </table>
     </div>
-    <h3>Shops in {{ s.year }}</h3>
+    <h3 id="shops-{{ s.year }}">Shops in {{ s.year }}</h3>
     {% if s.shop_rows %}
       <div class="table-wrap">
-        <table>
+        <table aria-labelledby="shops-{{ s.year }}">
           <thead><tr><th>Shop</th><th class="num">Bought from it</th><th class="num">Returned by it</th></tr></thead>
           <tbody>
             {% for r in s.shop_rows %}
               <tr>
-                <td>{{ r.shop }}</td>
+                <th scope="row">{{ r.shop }}</th>
                 <td class="num{% if not r.sold %} zero{% endif %}">{{ r.sold|zl }}</td>
                 <td class="num{% if not r.returned %} zero{% endif %}">{{ r.returned|zl }}</td>
               </tr>
             {% endfor %}
           </tbody>
-          <tfoot><tr><td>Total</td><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td></tr></tfoot>
+          <tfoot><tr><th scope="row">Total</th><td class="num">{{ s.purchases|zl }}</td><td class="num">{{ s.returns|zl }}</td></tr></tfoot>
         </table>
       </div>
     {% else %}
@@ -137,14 +144,14 @@
   {% endfor %}
 
   <section class="period month-by-month">
-    <h2>Month by month</h2>
+    <h2 id="month-by-month">Month by month</h2>
     <p class="muted">What was spent on shops each month: purchases minus returns.</p>
     <div class="table-wrap">
-      <table>
+      <table aria-labelledby="month-by-month">
         <thead><tr><th>Month</th><th class="num">{{ this_year }}</th><th class="num">{{ this_year|add:"-1" }}</th></tr></thead>
         <tbody>
           {% for name, now, before in months %}
-            <tr><td>{{ name }}</td>
+            <tr><th scope="row">{{ name }}</th>
               <td class="num{% if not now %} zero{% endif %}">{% if now is None %}–{% else %}{{ now|zl }}{% endif %}</td>
               <td class="num{% if not before %} zero{% endif %}">{{ before|zl }}</td></tr>
           {% endfor %}

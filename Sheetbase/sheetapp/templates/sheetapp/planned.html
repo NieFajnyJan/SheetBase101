@@ -22,19 +22,20 @@
   td.desc { white-space: normal; }
   th { background: #f3f4f7; }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
-  tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
+  tfoot td, tfoot th { font-weight: 700; border-top: 2px solid #ccc; }
   .tag { border-radius: 10px; padding: .05rem .5rem; font-size: .8rem; background: #e8ecf5; color: #2b3a55; }
   td.actions a { margin-right: .6rem; }
   .balances { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem; }
   .balances h3 { margin: 0 0 .4rem; font-size: 1rem; }
   .balances .card { padding: .9rem 1.2rem; }
-  /* A debt from a purchase links to it: same colour as the text, a faint underline that darkens on hover. */
-  a.src { color: inherit; text-decoration: underline; text-decoration-color: #d4d7de; text-underline-offset: 2px; }
+  /* A debt from a purchase links to it: same colour as the text, a grey underline that darkens on hover. */
+  a.src { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
   a.src:hover { color: #2b3a55; text-decoration-color: currentColor; }
 </style>
 {% endblock %}
 
 {% block content %}
+  <h1 class="visually-hidden">Planned transactions</h1>
   <div class="forms">
     <form class="card form-card" method="post">
       {% csrf_token %}
@@ -52,19 +53,19 @@
   <div class="balances">
     {% with rows=owed_to_me.0 sum=owed_to_me.1 %}
       <section class="card">
-        <h3>Owed to me</h3>
+        <h3 id="owed-to-me">Owed to me</h3>
         {% if rows %}
-          <table>{% for person, amount in rows %}<tr><td>{{ person }}</td><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
-            <tfoot><tr><td>Total</td><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
+          <table aria-labelledby="owed-to-me">{% for person, amount in rows %}<tr><th scope="row">{{ person }}</th><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
+            <tfoot><tr><th scope="row">Total</th><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
         {% else %}<p class="muted">Nobody owes you anything.</p>{% endif %}
       </section>
     {% endwith %}
     {% with rows=i_owe.0 sum=i_owe.1 %}
       <section class="card">
-        <h3>I owe</h3>
+        <h3 id="i-owe">I owe</h3>
         {% if rows %}
-          <table>{% for person, amount in rows %}<tr><td>{{ person }}</td><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
-            <tfoot><tr><td>Total</td><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
+          <table aria-labelledby="i-owe">{% for person, amount in rows %}<tr><th scope="row">{{ person }}</th><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
+            <tfoot><tr><th scope="row">Total</th><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
         {% else %}<p class="muted">You don't owe anyone anything.</p>{% endif %}
       </section>
     {% endwith %}
@@ -74,7 +75,7 @@
   {% if debts %}
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Owes</th><th>Owed to</th><th>What for</th><th class="num">Amount</th><th>Added</th><th></th></tr></thead>
+        <thead><tr><th>Owes</th><th>Owed to</th><th>What for</th><th class="num">Amount</th><th>Added</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {% for d in debts %}
             <tr>

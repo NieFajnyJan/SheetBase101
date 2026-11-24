@@ -1,4 +1,5 @@
 import importlib
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -209,6 +210,108 @@ class DexLoginTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Transactions
+class HeaderTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan", last_name="Kowalski")
+        self.client.force_login(self.jan)
+
+    def nav(self, url):
+        html = self.client.get(url).content.decode()
+        return html[html.index('<nav aria-label="Main">'):html.index("</nav>")]
+
+    def test_the_page_you_are_on_is_marked(self):
+        for url, current in (("transactions", "Transactions"), ("planned", "Planned"), ("summary", "Summary")):
+            nav = self.nav(reverse(url))
+            self.assertEqual(nav.count('aria-current="page"'), 1)
+            self.assertIn(f'aria-current="page">{current}</a>', nav)
+
+    def test_pages_under_a_section_mark_it(self):
+        t = Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan,
+                                       recipient=User.objects.get(username=SHOP_USERNAME),
+                                       created_by=self.jan, description="x")
+        self.assertIn('aria-current="page">Transactions</a>', self.nav(reverse("correct_transaction", args=[t.pk])))
+
+    def test_admin_link_only_for_staff(self):
+        self.assertNotIn("Admin", self.nav(reverse("summary")))
+        self.jan.is_staff = True
+        self.jan.save()
+        self.assertIn("Admin", self.nav(reverse("summary")))
+
+    def test_a_long_name_can_still_be_read_in_full(self):
+        self.assertContains(self.client.get(reverse("summary")), '<span class="user" title="Jan Kowalski">Jan Kowalski</span>')
+
+
+class FormMarkupTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.client.force_login(self.jan)
+
+    def test_fields_are_wrapped_in_divs_so_owes_hides_whole(self):
+        html = self.client.get(reverse("planned")).content.decode()
+        start = html.index('<div class="field field-debtor">')
+        # The select and its help text are inside the wrapper that splitting hides.
+        self.assertLess(start, html.index('id="id_debtor"'))
+        self.assertNotIn('<p class="field-', html)
+
+    def test_no_template_comment_shows_on_a_page(self):
+        # A {# #} comment only works on one line: a longer one is printed as text, tags in it and all.
+        for url in ("transactions", "planned", "summary"):
+            self.assertNotContains(self.client.get(reverse(url)), "{#")
+
+    def test_who_chips_in_is_a_group_with_a_legend(self):
+        page = self.client.get(reverse("transactions"))
+        html = page.content.decode()
+        group = html[html.index('<fieldset class="field-participants">'):]
+        self.assertTrue(group.split(">", 1)[1].lstrip().startswith("<legend>Who chips in</legend>"))
+
+    def test_an_error_about_who_chips_in_is_linked_to_the_group(self):
+        page = self.client.post(reverse("planned"), {"creditor": self.jan.pk, "amount": "10", "description": "Pizza",
+                                                     "split": "on", "participants": [self.jan.pk]})
+        self.assertContains(page, '<fieldset class="field-participants" aria-describedby="id_participants_error">')
+        self.assertContains(page, '<ul class="errorlist" id="id_participants_error"><li>Tick at least one person')
+
+    def test_debts_to_tick_are_a_group_with_a_legend(self):
+        PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
+                                          description="Kawa", created_by=self.jan)
+        page = self.client.post(reverse("transactions"), {
+            "amount": "5", "payer": self.jan.pk, "recipient": self.ola.pk, "description": "Zwrot",
+            "date": today().strftime("%d.%m.%Y")})
+        self.assertContains(page, '<fieldset class="debts">')
+        self.assertContains(page, "<legend>What is this payment of 5,00\xa0zł for?")
+
+
+class HeadingsAndTablesTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.client.force_login(self.jan)
+
+    def test_each_page_has_one_main_heading(self):
+        t = Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan,
+                                       recipient=User.objects.get(username=SHOP_USERNAME), created_by=self.jan,
+                                       description="x")
+        d = PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                              description="Kawa", created_by=self.jan)
+        for url in (reverse("transactions"), reverse("planned"), reverse("summary"),
+                    reverse("correct_transaction", args=[t.pk]), reverse("cancel_transaction", args=[t.pk]),
+                    reverse("edit_planned", args=[d.pk]), reverse("delete_planned", args=[d.pk])):
+            self.assertEqual(self.client.get(url).content.decode().count("<h1"), 1, url)
+
+    def test_summary_names_are_row_headers_and_tables_are_labelled(self):
+        html = self.client.get(reverse("summary")).content.decode()
+        self.assertIn('<th scope="row">Jan</th>', html)
+        self.assertIn('<table aria-labelledby="all-time">', html)
+        self.assertIn('id="all-time"', html)
+        self.assertIn("<strong>Total spent</strong> = purchases − returns + paid to members − received from members", html)
+        self.assertNotIn(' title="', html[html.index("<main>"):])  # nothing explained only on hover
+
+    def test_action_columns_have_a_header(self):
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                          description="Kawa", created_by=self.jan)
+        self.assertContains(self.client.get(reverse("planned")), '<th><span class="visually-hidden">Actions</span></th>')
+
+
 class TransactionModelTests(TestCase):
     def setUp(self):
         self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
@@ -488,6 +591,24 @@ class TransactionListTests(TestCase):
         self.assertEqual(years, ["", today().year, today().year - 5])
 
 
+    def test_filter_and_add_form_ids_dont_clash(self):
+        html = self.client.get(self.url).content.decode()
+        ids = re.findall(r' id="([^"]+)"', html)
+        self.assertEqual([i for i in set(ids) if ids.count(i) > 1], [])
+        self.assertIn('<label for="filter_payer">', html)
+
+    def test_hide_cancelled_waits_for_the_filter_button(self):
+        html = self.client.get(self.url).content.decode()
+        self.assertNotIn(".submit()", html)
+        self.assertLess(html.index('name="hide_cancelled"'), html.index('<button class="btn">Filter</button>'))
+
+    def test_amount_comes_right_after_the_date(self):
+        self.make("12.00", self.jan, self.shop)
+        html = self.client.get(self.url).content.decode()
+        head = html[html.index("<thead>"):html.index("</thead>")]
+        self.assertEqual(re.findall(r"<th[^>]*>([^<]*)</th>", head)[:3], ["Date paid", "Amount", "Paid by"])
+
+
 class DoneTransactionIsFinalTests(TestCase):
     def setUp(self):
         self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
@@ -709,6 +830,15 @@ class CorrectionTests(TestCase):
         self.assertEqual(self.row().current.amount, Decimal("12.49"))
         self.assertEqual(Transaction.objects.get().amount, Decimal("124.90"))  # original untouched
         self.assertContains(self.client.get(self.list_url), "corrected ×1")
+
+    def test_history_button_says_what_it_does_and_works_without_javascript(self):
+        self.correct(amount="12,49")
+        self.correct(amount="13,00")
+        html = self.client.get(self.list_url).content.decode()
+        self.assertIn('aria-controls="history-%d" aria-expanded="true" aria-label="corrected ×2 – history of '
+                      'changes">corrected ×2</button>' % self.t.pk, html)
+        # Shown in the page as sent; only the script hides it (and updates aria-expanded).
+        self.assertIn(f'<tr class="history" id="history-{self.t.pk}">', html)
 
     def test_latest_correction_wins(self):
         self.correct(amount="12.49")
@@ -1090,7 +1220,7 @@ class YearlySummaryTests(TestCase):
         self.make("30.00", self.shop, self.jan, self.d(self.this_year, 1))
         page = self.client.get(self.url)
         self.assertEqual(self.row(page.context["summaries"][0], self.jan).total_spent, Decimal("70.00"))
-        self.assertContains(page, "<th class=\"num\">Total spent</th>", count=2)
+        self.assertContains(page, "<th class=\"num\">Total spent</th>", count=3)  # all time and both years
 
     def test_month_by_month_compares_with_last_year(self):
         self.make("100.00", self.jan, self.shop, self.d(self.this_year, 1))

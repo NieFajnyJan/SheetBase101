@@ -16,7 +16,7 @@
     {% csrf_token %}
     {# What's listed below, so Delete deletes exactly that – not rows added or changed since. #}
     <input type="hidden" name="rows" value="{{ signature }}">
-    <h2>Delete planned transaction</h2>
+    <h1>Delete planned transaction</h1>
     <p><strong>Only delete a debt that was entered by mistake.</strong>
       If it was paid, add the payment on the <a href="{% url 'transactions' %}">Transactions</a> page instead –
       that settles the debt and keeps it in the history.</p>

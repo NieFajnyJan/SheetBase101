@@ -1,7 +1,9 @@
 {# An add form’s own fields, then the “Split between people” section (left out with no_split). #}
 {{ form.non_field_errors }}
+{% comment %}A div, not a p: the help text and errors inside are blocks, which would end a p early – and then
+hiding the wrapper (as splitting does with “owes”) would leave the box itself showing.{% endcomment %}
 {% for field in form.main_fields %}
-  <p class="field-{{ field.name }}">{{ field.as_field_group }}</p>
+  <div class="field field-{{ field.name }}">{{ field.as_field_group }}</div>
 {% endfor %}
 {% for field in form.hidden_fields %}{{ field }}{% endfor %}
 {% if not no_split %}
@@ -11,19 +13,23 @@
     <div class="split-body">
       <p class="muted">Everyone you tick chips in an equal share. Each of them gets a planned transaction for it,
         except whoever is owed the money. Nothing is saved before you see the shares.</p>
-      <div class="field-participants">
-        <div class="participants-head">{{ form.participants.label_tag }}<button type="button" class="tick-all" hidden>Tick everyone</button></div>
-        {{ form.participants.errors }}{{ form.participants }}
-      </div>
+      {# A group of tick boxes: the legend names it, and an error about it is read out with it. #}
+      {% with f=form.participants %}
+        <fieldset class="field-participants"{% if f.errors %} aria-describedby="{{ f.auto_id }}_error"{% endif %}>
+          <legend>{{ f.label }}</legend><button type="button" class="tick-all" hidden>Tick everyone</button>
+          {% if f.errors %}<ul class="errorlist" id="{{ f.auto_id }}_error">{% for e in f.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+          {{ f }}
+        </fieldset>
+      {% endwith %}
       {% if form.split_amount %}
         {% with f=form.split_amount %}
-          <p>
+          <div class="field">
             <span class="label-row">{{ f.label_tag }}
               <span class="hint" tabindex="0" role="note" aria-label="{{ f.field.hint }}">?<span class="hint-text" aria-hidden="true">{{ f.field.hint }}</span></span>
             </span>
             {{ f.errors }}{{ f }}
             <span class="helptext" id="{{ f.auto_id }}_helptext">{{ f.help_text }}</span>
-          </p>
+          </div>
         {% endwith %}
       {% endif %}
     </div>
@@ -32,19 +38,31 @@
     .split { border: 1px solid #e3e3e3; border-radius: 6px; padding: .4rem .9rem .2rem; margin: 1rem 0; }
     .split legend { padding: 0 .3rem; }
     .split .split-toggle { display: flex; align-items: center; gap: .4rem; margin: 0; cursor: pointer; }
-    .participants-head { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; }
-    /* The “?” next to “Amount to split”: the explanation shows on hover, on keyboard focus and on tap. */
-    .label-row { display: flex; align-items: baseline; gap: .4rem; }
+    .field { margin: .8rem 0; }
+    .field-participants { border: 0; margin: .8rem 0; padding: 0; min-width: 0; }
+    /* The legend on the left, “Tick everyone” on the right of the same line. */
+    .field-participants legend { float: left; font-weight: 600; padding: 0; margin-bottom: .25rem; }
+    .field-participants .tick-all { float: right; }
+    .field-participants > .errorlist, .field-participants > div { clear: both; }
+    /* The “?” next to “Amount to split”: the explanation shows on hover, on keyboard focus and on tap,
+       and Escape closes it. */
+    /* The explanation opens from the start of this row, not from the “?”, so it's never wider than the
+       form and can't run off a phone's screen. */
+    .label-row { position: relative; display: flex; align-items: baseline; gap: .4rem; }
     .label-row label { margin-bottom: .25rem; }
-    .hint { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 1.15rem; height: 1.15rem;
+    .hint { display: inline-flex; align-items: center; justify-content: center; width: 1.15rem; height: 1.15rem;
             border-radius: 50%; background: #e8ecf5; color: #2b3a55; font-size: .8rem; font-weight: 700; cursor: help; }
-    .hint-text { display: none; position: absolute; left: 0; top: 1.5rem; z-index: 10; width: min(280px, 75vw);
+    .hint-text { display: none; position: absolute; left: 0; top: 100%; z-index: 10; width: 100%; max-width: 320px;
+                 box-sizing: border-box;
                  background: #2b3a55; color: #fff; font-weight: 400; font-size: .85rem; line-height: 1.4;
                  padding: .6rem .75rem; border-radius: 6px; box-shadow: 0 2px 8px #0003; }
     .hint:hover .hint-text, .hint:focus .hint-text { display: block; }
+    .hint.closed .hint-text { display: none; }
+    /* Bridges the gap between the “?” and the explanation, so moving the mouse onto it doesn't close it. */
+    .hint-text::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: .8rem; }
     .tick-all { background: none; border: 0; padding: 0; font: inherit; font-size: .9rem; color: #2b3a55; text-decoration: underline; cursor: pointer; }
-    .field-participants > div:not(.participants-head) { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .2rem .8rem; margin: .3rem 0 .6rem; }
-    .field-participants > div:not(.participants-head) label { display: flex; align-items: center; gap: .4rem; font-weight: 400; margin: 0; cursor: pointer; }
+    .field-participants > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .2rem .8rem; margin: .3rem 0 .6rem; }
+    .field-participants > div label { display: flex; align-items: center; gap: .4rem; font-weight: 400; margin: 0; cursor: pointer; }
   </style>
   <script>
     // The members list shows only when “Split between people” is ticked; on the Planned form it replaces “owes”.
@@ -73,6 +91,15 @@
       boxes.forEach(b => b.addEventListener("change", label));
       all.hidden = boxes.length === 0;
       label();
+
+      // Escape closes the “?” explanation – also when it's open because the mouse is over it.
+      // It opens again the next time it's hovered, focused or tapped.
+      const hint = tick.form.querySelector(".hint");
+      if (hint) {
+        document.addEventListener("keydown", e => { if (e.key === "Escape") hint.classList.add("closed"); });
+        ["mouseenter", "focus"].forEach(name => hint.addEventListener(name, () => hint.classList.remove("closed")));
+        hint.addEventListener("click", () => hint.classList.remove("closed"));
+      }
     })();
   </script>
 {% endif %}
