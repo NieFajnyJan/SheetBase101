@@ -466,6 +466,28 @@ class TransactionListTests(TestCase):
             self.assertEqual(zl(Decimal(value)), f"{text}\xa0zł")
 
 
+    def test_a_filter_that_cant_be_used_shows_nothing(self):
+        self.make("10.00", self.jan, self.shop)
+        page = self.client.get(self.url, {"month": "3"})  # a month without a year
+        self.assertEqual(list(page.context["transactions"]), [])
+        self.assertIsNone(page.context["total"])
+        self.assertContains(page, "Nothing shown:")
+
+    def test_filters_in_use_are_listed(self):
+        self.make("10.00", self.jan, self.shop)
+        page = self.client.get(self.url, {"payer": self.jan.pk, "year": today().year, "month": "3"})
+        self.assertContains(page, f"Showing: paid by jan · March {today().year}")
+        # Filtering again, or clearing, comes back to the list rather than the top of the page.
+        self.assertContains(page, f'action="{self.url}#done"')
+        self.assertContains(page, f'<a href="{self.url}#done">Clear</a>')
+
+    def test_years_come_from_the_transactions(self):
+        old = self.make("10.00", self.jan, self.shop)
+        Transaction.objects.filter(pk=old.pk).update(date=date(today().year - 5, 1, 1))  # from before the limit
+        years = [y for y, _ in self.client.get(self.url).context["filter_form"].fields["year"].choices]
+        self.assertEqual(years, ["", today().year, today().year - 5])
+
+
 class DoneTransactionIsFinalTests(TestCase):
     def setUp(self):
         self.boss = User.objects.create_superuser("boss", "boss@example.com", "x")
@@ -880,6 +902,31 @@ class CorrectionTests(TestCase):
 
 
 # --------------------------------------------------------------------------- Yearly summary
+class OldDateCorrectionTests(TestCase):
+    """A transaction dated before the usual limit can be corrected without having to change its date."""
+
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.old = date(today().year - 5, 3, 1)
+        self.t = Transaction.objects.create(amount=Decimal("10.00"), payer=self.jan, recipient=self.shop,
+                                            created_by=self.jan, description="Kawa", date=today())
+        Transaction.objects.filter(pk=self.t.pk).update(date=self.old)
+        self.client.force_login(self.jan)
+
+    def correct(self, when):
+        return self.client.post(reverse("correct_transaction", args=[self.t.pk]), {
+            "amount": "12.00", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "Kawa",
+            "date": f"{when:%d.%m.%Y}", "reason": "typo"})
+
+    def test_its_date_can_stay(self):
+        self.assertRedirects(self.correct(self.old), reverse("transactions"))
+        self.assertEqual(Transaction.objects.get().current.amount, Decimal("12.00"))
+
+    def test_another_old_date_is_refused(self):
+        self.assertContains(self.correct(self.old.replace(month=4)), "can be at most")
+
+
 class YearlySummaryTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com")

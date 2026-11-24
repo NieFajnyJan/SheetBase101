@@ -4,6 +4,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Sum
+from django.db.models.functions import ExtractYear
 from django.http import Http404
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
@@ -105,18 +106,23 @@ def transactions(request):
                 return redirect(request.get_full_path())
             return confirm_payment(request, form, obj, paying)
 
-    filter_form = HistoryFilterForm(request.GET)
+    years = Transaction.objects.with_current().annotate(y=ExtractYear("cur_date")).values_list("y", flat=True)
+    filter_form = HistoryFilterForm(request.GET, years=set(years))
     done = transactions_with_history().order_by("-cur_date", "-created_at")
-    if filter_form.is_valid():
+    # A filter that can't be read shows nothing, rather than everything under a total that looks filtered.
+    valid = filter_form.is_valid()
+    if valid:
         done = filter_form.filter(done)
     return render(request, "sheetapp/transactions.html", {
         "form": form,
         "paying": paying,
         "shop_form": shop_form,
         "filter_form": filter_form,
+        "filters_valid": valid,
         "filtered": any(request.GET.get(f) for f in filter_form.fields),
-        "transactions": done,
-        "total": done.aggregate(t=Sum("cur_counted"))["t"] or 0,  # corrected amounts; cancelled count 0
+        "transactions": done if valid else [],
+        # Corrected amounts; cancelled ones count 0.
+        "total": (done.aggregate(t=Sum("cur_counted"))["t"] or 0) if valid else None,
     })
 
 
