@@ -69,7 +69,7 @@ class UpToDateMixin:
     since, nothing is saved: fields the user didn't touch take the newer values, what they typed is
     kept, fields changed on both sides are flagged, and they're asked to check and send it again."""
 
-    again = "fields you didn't change now show the new values and what you typed is kept. Check them and save again"
+    again = "Fields you didn't change now show the new values and what you typed is kept. Check them and save again"
 
     def add_shown_field(self, record, names):
         """`record` as it is now; `names` are the fields compared."""
@@ -107,7 +107,7 @@ class UpToDateMixin:
         self.data["shown"] = self.encode()  # sent again, it's checked against the values now
         what = ", ".join(f"{self.record._meta.get_field(n).verbose_name.removesuffix(' (zł)')} "
                          f"(now {show(getattr(self.record, n))})" for n in changed)
-        raise forms.ValidationError(f"Changed after you opened this page: {what}. Nothing was saved – {self.again}.")
+        raise forms.ValidationError(f"Nothing was saved. It changed after you opened this page: {what}. {self.again}.")
 
 
 class CorrectionForm(UpToDateMixin, TransactionForm):
@@ -172,7 +172,7 @@ class CorrectionForm(UpToDateMixin, TransactionForm):
 class CancelForm(UpToDateMixin, forms.ModelForm):
     """Cancelling = a correction that keeps the current values, marked cancelled. Only asks why."""
 
-    again = "check what it is now and cancel again"
+    again = "Check what it is now and cancel again"
 
     class Meta:
         model = TransactionCorrection

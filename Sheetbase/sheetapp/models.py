@@ -336,8 +336,8 @@ class TransactionCorrection(models.Model):
             self._save(*args, **kwargs)
         except IntegrityError:
             if self.original.corrections.filter(version=self.version).exists():
-                raise ValidationError("This transaction was corrected by someone else at the same moment, "
-                                      "so nothing was saved. Open it again to see what it is now.") from None
+                raise ValidationError("Nothing was saved. This transaction was corrected by someone else at the "
+                                      "same moment – open it again to see what it is now.") from None
             raise
 
     def _save(self, *args, **kwargs):
@@ -518,8 +518,8 @@ class PlannedTransaction(models.Model):
             bumped = (PlannedTransaction._base_manager.filter(pk=self.pk, version=self.version)
                       .update(version=F("version") + 1))
             if not bumped:
-                raise ValidationError("This debt was changed or paid by someone else at the same moment, so "
-                                      "nothing was saved. Open it again to see what it is now.")
+                raise ValidationError("Nothing was saved. This debt was changed or paid by someone else at the "
+                                      "same moment – open it again to see what it is now.")
             if PlannedTransaction.objects.settled().filter(pk=self.pk).exists():
                 raise ValueError("A settled planned transaction can't be edited.")
             self.version += 1
