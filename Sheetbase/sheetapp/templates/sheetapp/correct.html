@@ -13,7 +13,7 @@
     {% csrf_token %}
     {% if cancelling %}
       <h1>Cancel transaction</h1>
-      <p><strong>{{ c.date|day }} · {{ c.payer }} → {{ c.recipient }} · {{ c.description }} · {{ c.amount|zl }}</strong></p>
+      <p><strong>{{ c.date|day }} · {{ c.payer|party }} → {{ c.recipient|party }} · {{ c.description }} · {{ c.amount|zl }}</strong></p>
       <p class="muted">It stays in the history, marked “Cancelled”, and stops counting towards totals.
         It can't be un-cancelled – add a new transaction instead.</p>
       {% with e=effects %}

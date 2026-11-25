@@ -477,6 +477,46 @@ class SameWordsAndNumbersTests(TestCase):
         self.assertContains(page, "Nothing was changed.", status_code=403)
 
 
+class ShopTagTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.client.force_login(self.jan)
+
+    def test_shops_are_marked_in_the_list_and_the_dropdowns(self):
+        Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan, recipient=self.shop,
+                                   created_by=self.jan, description="Kawa")
+        Transaction.objects.create(amount=Decimal("2.00"), payer=self.jan, recipient=self.ola,
+                                   created_by=self.jan, description="Zwrot")
+        html = self.client.get(reverse("transactions")).content.decode()
+        self.assertIn('Shop <span class="tag tag-shop">shop</span>', html)
+        self.assertNotIn('Ola <span class="tag tag-shop">', html)
+        self.assertIn(f'<optgroup label="Shops">\n  <option value="{self.shop.pk}">Shop (shop)</option>', html)
+        self.assertIn(f'<option value="{self.ola.pk}">Ola</option>', html)
+        # Both add-form dropdowns and both filters, members first.
+        self.assertEqual(html.count('<optgroup label="Shops">'), 4)
+        self.assertLess(html.index('<optgroup label="Members">'), html.index('<optgroup label="Shops">'))
+
+    def test_grouped_dropdowns_still_save_and_filter(self):
+        page = self.client.post(reverse("transactions"), {
+            "amount": "3,00", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "Kawa",
+            "date": today().strftime("%d.%m.%Y")}, follow=True)
+        self.assertContains(page, "Kawa – 3,00\u00a0zł (Jan → Shop)")
+        page = self.client.get(reverse("transactions"), {"recipient": self.shop.pk})
+        self.assertContains(page, f'<option value="{self.shop.pk}" selected>Shop (shop)</option>')
+
+    def test_a_corrected_shop_is_marked_in_the_history(self):
+        other = User.objects.create(username="shop-m2", email="m2@example.com", first_name="M2", is_shop=True)
+        t = Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan, recipient=self.shop,
+                                       created_by=self.jan, description="Kawa")
+        TransactionCorrection.objects.create(original=t, amount=t.amount, payer=self.jan, recipient=other,
+                                             description=t.description, date=t.date, reason="Wrong shop",
+                                             created_by=self.jan)
+        self.assertContains(self.client.get(reverse("transactions")),
+                            'Shop <span class="tag tag-shop">shop</span> → M2 <span class="tag tag-shop">shop</span>')
+
+
 class OneStylesheetTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com")
