@@ -1,74 +1,19 @@
-<!doctype html>
+{% load static %}<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}SheetBase{% endblock %}</title>
-  <style>
-    /* --muted: the one grey for secondary text – at least 5:1 on every background used here.
-       --field-border: borders of what you type in or pick from, at least 3:1 on white. */
-    :root { --muted: #5f6470; --field-border: #868b95; --focus: #2b3a55; }
-    body { font-family: system-ui, sans-serif; margin: 0; color: #222; background: #fafafa; }
-    /* Wraps instead of running off the screen: on a phone the links go onto a second row. */
-    header { background: #2b3a55; color: #fff; padding: .6rem 1rem; display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem; }
-    header a, header button { color: #fff; text-decoration: none; }
-    header .brand { font-weight: 700; font-size: 1.1rem; margin-right: auto; }
-    header nav ul { display: flex; flex-wrap: wrap; gap: .2rem; list-style: none; margin: 0; padding: 0; }
-    header nav a { display: block; padding: .3rem .6rem; border-radius: 4px; }
-    header nav a:hover { background: #ffffff1f; }
-    /* The page you're on: underlined and bold, not only a different colour. */
-    header nav a[aria-current="page"] { font-weight: 700; background: #ffffff26; box-shadow: inset 0 -3px 0 #fff; }
-    header .account { display: flex; align-items: center; gap: .6rem; min-width: 0; }
-    /* A long name is cut short (all of it shows on hover). */
-    header .user { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    header form { margin: 0; }
-    header button { background: none; border: 1px solid #fff8; border-radius: 4px; padding: .25rem .7rem; cursor: pointer; font: inherit; }
-    /* Keyboard focus on the dark header: a thick yellow ring, easy to see. */
-    header a:focus-visible, header button:focus-visible { outline: 3px solid #ffd54f; outline-offset: 2px; }
-    @media (max-width: 600px) {
-      header nav { order: 3; flex-basis: 100%; }
-      header nav a { padding: .3rem .45rem; }
-      header .user { max-width: 10ch; }
-    }
-    main { max-width: 480px; margin: 2rem auto; padding: 0 1rem; }
-    .card { background: #fff; border: 1px solid #e3e3e3; border-radius: 8px; padding: 1.2rem 1.5rem; }
-    .card p { margin: .8rem 0; }
-    label { display: block; font-weight: 600; margin-bottom: .25rem; }
-    input[type=text], input[type=email], input[type=password], input[type=date], select { width: 100%; box-sizing: border-box; padding: .5rem; border: 1px solid var(--field-border); border-radius: 4px; font: inherit; }
-    /* Keyboard focus: a thick ring, not just a slightly darker border. */
-    input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, a:focus-visible, summary:focus-visible {
-      outline: 3px solid var(--focus); outline-offset: 2px; }
-    .helptext, .helptext ul { color: var(--muted); font-size: .85rem; }
-    .helptext ul { margin: .3rem 0 0; padding-left: 1.2rem; }
-    .errorlist { color: #b00020; list-style: none; padding: 0; margin: .2rem 0; font-size: .9rem; }
-    .btn { display: inline-block; background: #2b3a55; color: #fff; border: 0; border-radius: 4px; padding: .6rem 1.3rem; font: inherit; cursor: pointer; text-decoration: none; }
-    .btn-social { width: 100%; background: #fff; color: #222; border: 1px solid var(--field-border); margin-bottom: .5rem; }
-    .btn-social:hover { background: #f3f3f3; }
-    .divider { display: flex; align-items: center; gap: .6rem; color: var(--muted); font-size: .9rem; }
-    .divider::before, .divider::after { content: ""; flex: 1; border-top: 1px solid #e3e3e3; }
-    .msg { background: #e6f4ea; border-radius: 6px; border-left: 5px solid #1e7a3c; padding: .6rem 1rem; }
-    .msg-info { background: #e8eef9; border-color: #2b5bb5; }
-    .msg-warning { background: #fff4e0; border-color: #a05a00; }
-    .msg-error { background: #fde8ea; border-color: #b00020; }
-    .muted { color: var(--muted); }
-    /* Read out by screen readers, not shown. */
-    .visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
-                       clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-    .card h1 { margin-top: 0; font-size: 1.35rem; }
-    /* A row's name is its header (read out with each value in the row), but looks like any other cell. */
-    tbody th[scope="row"] { background: #fff; font-weight: 400; }
-    /* A table too wide for the screen says so, above it. */
-    .table-wrap.scrolls::before { content: "Scroll sideways for more columns →"; display: block; position: sticky; left: 0;
-                                  font-size: .85rem; color: var(--muted); margin-bottom: .3rem; }
-    .switch { display: block; font-weight: 600; color: #2b3a55; text-decoration: none; margin-bottom: 1rem; }
-    .switch:hover { background: #f3f4f7; }
-    form[data-sending] button { cursor: progress; opacity: .7; }
-  </style>
+  {# All the styling is in one stylesheet; pages add nothing of their own. #}
+  <link rel="stylesheet" href="{% static 'sheetapp/app.css' %}">
+  <link rel="icon" href="{% static 'sheetapp/favicon.svg' %}" type="image/svg+xml">
+  <meta name="theme-color" content="#0f172a">
   {% block extra_head %}{% endblock %}
 </head>
-<body>
-  <header>
-    <a class="brand" href="{% url 'home' %}">SheetBase</a>
+<body class="{% block body_class %}{% endblock %}">
+  <header class="site-header">
+   <div class="inner">
+    <a class="brand" href="{% url 'home' %}"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#fff" fill-opacity=".15"/><g fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M8 11h16M8 16h16M8 21h10"/></g><circle cx="23" cy="21" r="3" fill="#10b981"/></svg>SheetBase</a>
     {% if user.is_authenticated %}
       {% with page=request.resolver_match.url_name %}
       <nav aria-label="Main">
@@ -87,10 +32,11 @@
     {% else %}
       <a href="{% url 'login' %}">Log in</a>
     {% endif %}
+   </div>
   </header>
   <main>
     {# Success green, information blue, warnings amber, errors red; warnings and errors are read out at once. #}
-    {% for message in messages %}<p class="msg msg-{{ message.level_tag }}" role="{% if message.level_tag == "warning" or message.level_tag == "error" %}alert{% else %}status{% endif %}">{{ message }}</p>{% endfor %}
+    {% if messages %}<div class="messages">{% for message in messages %}<p class="msg msg-{{ message.level_tag }}" role="{% if message.level_tag == "warning" or message.level_tag == "error" %}alert{% else %}status{% endif %}">{{ message }}</p>{% endfor %}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
   <script>

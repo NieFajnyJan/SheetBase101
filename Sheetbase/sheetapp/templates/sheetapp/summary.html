@@ -1,41 +1,13 @@
 {% extends "base.html" %}
 {% load money %}
 
+{% block body_class %}wide page-summary{% endblock %}
 {% block title %}Yearly summary · SheetBase{% endblock %}
 
-{% block extra_head %}
-<style>
-  main { max-width: 1100px; }  /* same as the Transactions page; fits the all-time table's 9 columns */
-  h1 { font-size: 1.4rem; }
-  h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
-  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
-  th { background: #f3f4f7; }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .zero { color: var(--muted); }
-  tfoot td, tfoot th { font-weight: 700; border-top: 2px solid #ccc; }
-  tfoot th { background: #fff; }
-  /* Long column names ("Received from members") take two lines, so the all-time table fits on a laptop. */
-  thead th { white-space: normal; vertical-align: bottom; }
-  /* The names stay in view while the rest of a wide table scrolls sideways (on a phone). */
-  tr > :first-child { position: sticky; left: 0; z-index: 1; }
-  tr > td:first-child { background: #fff; }
-  .totals { margin: .6rem 0 0; }
-  h3 { font-size: 1rem; margin: 1.2rem 0 .4rem; }
-  /* Each period has its own soft colour, so it's clear which year a table belongs to. */
-  .period { border-radius: 10px; border-left: 6px solid; padding: .3rem 1.2rem 1.2rem; margin: 1.5rem 0; }
-  .period h2 { margin-top: .9rem; }
-  .all-time { background: #eef2fb; border-color: #5b78c7; }
-  .this-year { background: #ecf7ef; border-color: #4f9d69; }
-  .last-year { background: #fbf4e6; border-color: #c99a3c; }
-  .month-by-month { background: #f3f4f7; border-color: #8a93a6; }
-</style>
-{% endblock %}
 
 {% block content %}
   <h1>Yearly summary</h1>
-  <p class="muted">Done transactions only, with corrections applied; cancelled ones don't count.
+  <p class="muted intro">Done transactions only, with corrections applied; cancelled ones don't count.
     <strong>Total spent</strong> = purchases − returns + paid to members − received from members.</p>
 
   {% with s=all_time %}

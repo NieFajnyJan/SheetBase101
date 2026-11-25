@@ -1,15 +1,9 @@
 {% extends "base.html" %}
 {% load money %}
 
+{% block body_class %}page-delete{% endblock %}
 {% block title %}Delete debt · SheetBase{% endblock %}
 
-{% block extra_head %}
-<style>
-  /* What changed since the page was opened: in words as well as colour. */
-  .changed { background: #fff4e0; }
-  .changed-note { color: #7a4100; }
-</style>
-{% endblock %}
 
 {% block content %}
   <form class="card" method="post">
@@ -29,9 +23,10 @@
     {% if problems %}
       <ul class="errorlist">{% for p in problems %}<li>{{ p }}</li>{% endfor %}</ul>
       <p class="muted">Nothing can be deleted.</p>
-    {% else %}
-      <button class="btn">Delete</button>
     {% endif %}
-    <a href="{% url 'planned' %}">Back</a>
+    <div class="actions">
+      {% if not problems %}<button class="btn btn-danger">Delete</button>{% endif %}
+      <a class="btn btn-secondary" href="{% url 'planned' %}">Back</a>
+    </div>
   </form>
 {% endblock %}

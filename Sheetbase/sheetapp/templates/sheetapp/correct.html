@@ -1,14 +1,10 @@
 {% extends "base.html" %}
 {% load money %}
 
+{% block body_class %}page-correct{% endblock %}
 {% block title %}{% if cancelling %}Cancel{% else %}Correct{% endif %} transaction · SheetBase{% endblock %}
 
 {% block extra_head %}{% if not cancelling %}{% include "sheetapp/_datepicker.html" %}{% endif %}
-<style>
-  .blocked { background: #fde8ea; border-radius: 6px; padding: .2rem 1rem; }
-  .effect-head { font-weight: 600; margin-bottom: .2rem; }
-  .card ul { margin-top: .2rem; padding-left: 1.2rem; }
-</style>
 {% endblock %}
 
 {% block content %}
@@ -31,7 +27,7 @@
             {% endfor %}</ul>
           </div>
         {% endif %}
-        {% if e.reopened or e.removed %}
+        {% if e.reopened or e.removed %}<div class="effects">
           <p>Cancelling it also changes these debts:</p>
           {% if e.reopened %}
             <p class="effect-head">Owed again – it paid them:</p>
@@ -41,15 +37,18 @@
             <p class="effect-head">Deleted – it made them:</p>
             <ul>{% for d in e.removed %}<li>{{ d.debtor }} owes {{ d.creditor }} {{ d.amount|zl }} – {{ d.description }}{% if d.is_settled %} <strong>(already paid)</strong>{% endif %}</li>{% endfor %}</ul>
           {% endif %}
-        {% endif %}
+        </div>{% endif %}
       {% endwith %}
     {% else %}
       <h1>Correct transaction</h1>
       <p class="muted">Change whatever was wrong. The original stays in the history.</p>
     {% endif %}
     {{ form.as_p }}
-    <button class="btn">{% if cancelling %}Cancel transaction{% else %}Save correction{% endif %}</button>
-    <a href="{{ back_url }}">Back</a>
+    <div class="actions">
+      {# Cancelling can't be undone: red, so it never looks like the usual next step. #}
+      <button class="btn{% if cancelling %} btn-danger{% endif %}">{% if cancelling %}Cancel transaction{% else %}Save correction{% endif %}</button>
+      <a class="btn btn-secondary" href="{{ back_url }}">Back</a>
+    </div>
   </form>
   {% endwith %}
 {% endblock %}

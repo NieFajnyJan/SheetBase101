@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 
+{% block body_class %}page-edit{% endblock %}
 {% block title %}Edit debt · SheetBase{% endblock %}
 
 {% block content %}
@@ -8,7 +9,9 @@
     <h1>Edit debt</h1>
     <p class="muted">Fix what was entered wrong. To record that it was paid, add a payment on the Transactions page instead.</p>
     {{ form.as_p }}
-    <button class="btn">Save</button>
-    <a href="{% url 'planned' %}">Back</a>
+    <div class="actions">
+      <button class="btn">Save</button>
+      <a class="btn btn-secondary" href="{% url 'planned' %}">Back</a>
+    </div>
   </form>
 {% endblock %}

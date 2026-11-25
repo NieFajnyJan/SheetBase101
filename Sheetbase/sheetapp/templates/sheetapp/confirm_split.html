@@ -1,20 +1,9 @@
 {% extends "base.html" %}
 {% load money %}
 
+{% block body_class %}page-confirm{% endblock %}
 {% block title %}Confirm split · SheetBase{% endblock %}
 
-{% block extra_head %}
-<style>
-  .shares { list-style: none; padding: 0; margin: .5rem 0 1rem; }
-  .shares li { display: flex; gap: .6rem; align-items: baseline; padding: .4rem 0; border-bottom: 1px dashed #dde; }
-  .shares .who { flex: 1; }
-  .shares .own { color: var(--muted); }
-  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .sum { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; }
-  .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
-  .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
-</style>
-{% endblock %}
 
 {% block content %}
   <form class="card" method="post">
@@ -48,7 +37,7 @@
       {% endfor %}
     </ul>
 
-    <p class="sum">Adds {{ plan.owed|length }} debt{{ plan.owed|length|pluralize }}:
+    <p class="panel sum">Adds {{ plan.owed|length }} debt{{ plan.owed|length|pluralize }}:
       <strong>{{ plan.owed_total|zl }}</strong> owed to {{ plan.creditor }}.</p>
 
     <p class="muted">Nothing is saved until you click Confirm.</p>
