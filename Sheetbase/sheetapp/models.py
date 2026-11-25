@@ -91,8 +91,9 @@ class User(AbstractUser):
         return self.get_full_name() or self.username
 
 
-# The fields a correction can change, in the order they're shown.
-CORRECTABLE_FIELDS = ["amount", "payer", "recipient", "description", "date"]
+# The fields a correction can change, in the order they're shown: like a sentence, “Jan paid M2 12,00 zł for coffee”
+# – the same order as a debt’s (owes, owed to, amount, what for).
+CORRECTABLE_FIELDS = ["payer", "recipient", "amount", "description", "date"]
 # Once a payment has settled debts, these can't be corrected any more (description and date still can).
 MONEY_FIELDS = ["amount", "payer_id", "recipient_id"]
 

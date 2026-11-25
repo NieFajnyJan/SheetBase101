@@ -67,15 +67,15 @@
   {% if transactions %}
     <div class="table-wrap">
       <table>
-        {# Amount right after the date: on a phone it's in view without scrolling sideways. #}
-        <thead><tr><th>Date paid</th><th class="num">Amount</th><th>Paid by</th><th>Paid to</th><th>Description</th><th>Added by</th><th>Added</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        {# Who paid whom, then the amount – the same order as the form and the debts table. #}
+        <thead><tr><th>Date paid</th><th>Paid by</th><th>Paid to</th><th class="num">Amount</th><th>Description</th><th>Added by</th><th>Added</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
         <tbody>
           {% for t in transactions %}
             {% with c=t.current paid_for=t.paid_for %}
             <tr id="t-{{ t.pk }}" class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
                 {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
-              <td class="val">{{ c.date|day }}</td><td class="num val">{{ c.amount|zl }}</td>
-              <td class="val">{{ c.payer|party }}</td><td class="val">{{ c.recipient|party }}</td>
+              <td class="val">{{ c.date|day }}</td>
+              <td class="val">{{ c.payer|party }}</td><td class="val">{{ c.recipient|party }}</td><td class="num val">{{ c.amount|zl }}</td>
               <td class="desc"><span class="val">{{ c.description }}</span>
                 {# Show or hide its history. The name starts with the visible text, so it can be said aloud to click it. Without JavaScript the history simply stays shown. #}
                 {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}" aria-expanded="true" aria-label="Cancelled – history of changes">Cancelled</button>
@@ -117,7 +117,7 @@
             {% endwith %}
           {% endfor %}
         </tbody>
-        <tfoot><tr><td>Total</td><td class="num">{{ total|zl }}</td><td colspan="6"></td></tr></tfoot>
+        <tfoot><tr><td colspan="3">Total</td><td class="num">{{ total|zl }}</td><td colspan="4"></td></tr></tfoot>
       </table>
     </div>
   {% elif not filters_valid %}
