@@ -57,7 +57,7 @@
 {% block content %}
   <h1 class="visually-hidden">Transactions</h1>
   <div class="forms">
-    <form class="card form-card" method="post">
+    <form class="card form-card" method="post" id="add-form">
       {% csrf_token %}
       <h2>Add done transaction</h2>
       {% if paying %}
@@ -80,11 +80,14 @@
       <details class="card"{% if shop_form.errors %} open{% endif %}>
         <summary>+ Add shop</summary>
         <p class="muted">Shop missing from “paid to”? Add it here.</p>
-        <form method="post">
-          {% csrf_token %}
-          {{ shop_form.as_p }}
-          <button class="btn" name="add_shop">Add shop</button>
-        </form>
+        {% comment %}Part of the add form (form="add-form"), so what's typed there comes back after adding the shop.
+        formnovalidate: the purchase doesn't have to be filled in to add a shop.{% endcomment %}
+        <div class="field">
+          <label for="id_name">Shop name:</label>
+          {% if shop_form.name.errors %}<ul class="errorlist" id="id_name_error">{% for e in shop_form.name.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+          <input type="text" name="name" id="id_name" maxlength="100" form="add-form"{% if shop_form.name.value %} value="{{ shop_form.name.value }}"{% endif %}{% if shop_form.name.errors %} aria-describedby="id_name_error"{% endif %}>
+        </div>
+        <button class="btn" name="add_shop" form="add-form" formnovalidate>Add shop</button>
       </details>
     </div>
   </div>
@@ -135,7 +138,7 @@
                 {% endif %}
               </td>
               <td>{{ t.created_by }}</td><td>{{ t.created_at|day }}</td>
-              <td class="actions">{% if t|correctable_by:user %}<a href="{% url 'correct_transaction' t.pk %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}">Cancel</a>{% endif %}</td>
+              <td class="actions">{% if t|correctable_by:user %}{% with back=history_query|urlencode %}<a href="{% url 'correct_transaction' t.pk %}{% if back %}?back={{ back }}{% endif %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}{% if back %}?back={{ back }}{% endif %}">Cancel</a>{% endwith %}{% endif %}</td>
             </tr>
             {% if t.is_corrected %}
               <tr class="history" id="history-{{ t.pk }}">

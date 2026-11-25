@@ -7,8 +7,10 @@ from django.contrib.auth.decorators import login_required
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db.models import Prefetch, Sum
 from django.db.models.functions import ExtractYear
-from django.http import Http404
+from django.http import Http404, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from django.utils.http import urlencode
 from django.utils import timezone
 from django.views.decorators.http import require_GET
 
@@ -84,6 +86,13 @@ def transactions(request):
     """One page: add a done transaction, add a missing shop, and see all done transactions
     with their total, optionally filtered."""
     paying = debt_to_mark_paid(request)
+    # What was sent: the form, or – showing the payment confirmation after a redirect – what it was shown for.
+    data = request.POST
+    if request.method == "POST":
+        request.session.pop(PREVIEW, None)
+    elif "preview" in request.GET and (shown := request.session.get(PREVIEW)):
+        data = stored_form(shown["data"])
+    sent = data is not request.POST or request.method == "POST"
     if paying and paying.is_settled:  # e.g. Confirm clicked twice: the first click already paid it
         messages.info(request, f"Nothing was saved. Already paid: {paying}")
         return redirect("planned")
@@ -91,7 +100,7 @@ def transactions(request):
         details = {"payer": paying.debtor.pk, "recipient": paying.creditor.pk, "amount": str(paying.amount),
                    "description": paying.description, "date": timezone.localdate().strftime(DATE_FORMATS[0]),
                    "submission": str(uuid.uuid4())}
-        if request.method == "GET":  # straight to the confirmation screen; its Back opens the form
+        if not sent:  # straight to the confirmation screen; its Back opens the form
             form = AddTransactionForm(details, paying=paying)
             if form.is_valid():
                 payment = form.save(commit=False)
@@ -100,16 +109,24 @@ def transactions(request):
         form = AddTransactionForm(initial=details, paying=paying)
     else:
         form = AddTransactionForm(initial={"payer": request.user})
+    if draft := request.session.pop(DRAFT, None):  # after adding a shop: what was being typed
+        form = AddTransactionForm(initial=draft, paying=paying)
     shop_form = ShopForm()
 
-    if request.method == "POST" and "add_shop" in request.POST:
-        shop_form = ShopForm(request.POST)
+    if sent and "add_shop" in data:
+        # Sent together with the add form, so what was typed there comes back, with the new shop picked.
+        shop_form = ShopForm(data)
+        draft = {k: (data.getlist(k) if k == "participants" else data[k]) for k in DRAFT_FIELDS if k in data}
         if shop_form.is_valid():
-            messages.success(request, f"Saved. Added shop: {shop_form.save()}")
-            return redirect(request.get_full_path())  # keeps the current filters
-    elif request.method == "POST":
-        form = AddTransactionForm(request.POST, paying=paying)
-        if form.is_valid() and "back" not in request.POST:  # Back: the form again, still filled in
+            shop = shop_form.save()
+            request.session[DRAFT] = {**draft, "recipient": shop.pk}
+            messages.success(request, f"Saved. Added shop: {shop}")
+            # Keeps the filters; #top: back at the form and the message, also when the page was on the list.
+            return redirect(here(request) + "#top")
+        form = AddTransactionForm(initial=draft, paying=paying)
+    elif sent:
+        form = AddTransactionForm(data, paying=paying)
+        if form.is_valid() and "back" not in data:  # Back: the form again, still filled in
             obj = form.save(commit=False)
             obj.created_by = request.user
             if form.cleaned_data["split"]:
@@ -121,8 +138,8 @@ def transactions(request):
                     messages.info(request, f"Not saved again. Already added: {e.record}")
                 else:
                     messages.success(request, f"Saved. Added: {obj}")
-                return redirect(request.get_full_path())
-            return confirm_payment(request, form, obj, paying)
+                return redirect(here(request))
+            return confirm_payment(request, form, obj, paying, data)
 
     years = Transaction.objects.with_current().annotate(y=ExtractYear("cur_date")).values_list("y", flat=True)
     # Its own ids: the add form above has a payer and a recipient too, and a label must point at one box.
@@ -138,7 +155,9 @@ def transactions(request):
         "shop_form": shop_form,
         "filter_form": filter_form,
         "filters_valid": valid,
-        "kept_ticks": kept_ticks(request),
+        "kept_ticks": kept_ticks(data),
+        # The filters in use, for Correct and Cancel to come back to.
+        "history_query": urlencode({k: request.GET[k] for k in filter_form.fields if request.GET.get(k)}),
         "filtered": any(request.GET.get(f) for f in filter_form.fields),
         "transactions": done if valid else [],
         # Corrected amounts; cancelled ones count 0.
@@ -175,39 +194,70 @@ def mark_paid_problem(paying, payment, chosen):
     return None
 
 
-def confirm_payment(request, form, payment, paying=None):
+# The session keys: the payment confirmation shown after a redirect, and the add form's draft kept over
+# adding a shop. The draft keeps what was typed, not the form's ids (a new form gets new ones).
+PREVIEW, DRAFT = "payment_preview", "add_draft"
+DRAFT_FIELDS = ["amount", "payer", "recipient", "description", "date", "split", "participants", "split_amount"]
+
+
+def stored_form(lists):
+    data = QueryDict(mutable=True)
+    for key, values in lists.items():
+        data.setlist(key, values)
+    return data
+
+
+def here(request, **params):
+    """This page's address with its query (filters, ?pay=), minus ?preview, plus `params`."""
+    query = request.GET.copy()
+    query.pop("preview", None)
+    query.update(params)
+    return f"{request.path}?{query.urlencode()}" if query else request.path
+
+
+def confirm_payment(request, form, payment, paying=None, data=None):
     """A payment between members: first shows which debts it settles and what's left over, with a
-    tick box per debt to choose what it's for; saves only when Confirm is clicked."""
+    tick box per debt to choose what it's for; saves only when Confirm is clicked. `data`: what was sent.
+    Sent by a form, the screen is shown after a redirect (?preview), so reloading it doesn't send it again."""
+    data = request.POST if data is None else data
     # On the screen itself the ticks decide (none ticked is a valid choice); arriving from the form,
     # it's the debt being marked paid, or the debts are picked automatically.
     chosen = {paying.pk} if paying else None
-    ticked = {int(pk) for pk in request.POST.getlist("debts") if pk.isdigit()}
-    if "choosing" in request.POST:
+    ticked = {int(pk) for pk in data.getlist("debts") if pk.isdigit()}
+    if "choosing" in data:
         chosen = ticked
-    elif request.POST.get("ticked_for") == ticks_key(payment):
+    elif data.get("ticked_for") == ticks_key(payment):
         # Back to the form and Add again: the ticks made before, as long as it's between the same people.
         chosen = ticked | (chosen or set())
     plan = None
     changed_debts, leftover_changed = set(), False  # what differs from the screen Confirm was clicked on
-    problem = paying and "confirm" in request.POST and mark_paid_problem(paying, payment, chosen)
+    problem = paying and "confirm" in data and mark_paid_problem(paying, payment, chosen)
     if problem:
         messages.error(request, f"Not saved. {problem}")
-    elif "confirm" in request.POST:
+    elif "confirm" in data:
         try:
             # Once the first click has paid the debts, the plan differs too: then it's AlreadyAdded.
             save_once(Transaction, payment.submission, lambda: record_payment(
-                payment, chosen=chosen, expected_signature=request.POST.get("plan", "")), also=(PlanChanged,))
+                payment, chosen=chosen, expected_signature=data.get("plan", "")), also=(PlanChanged,))
         except AlreadyAdded as e:  # e.g. Confirm clicked twice
             messages.info(request, f"Not saved again. Already added: {e.record}")
-            return redirect("planned" if paying else request.get_full_path())
+            return redirect("planned" if paying else here(request))
         except PlanChanged as changed:
             plan = changed.plan
-            changed_debts, leftover_changed = plan.changes_since(request.POST.get("plan", ""))
+            changed_debts, leftover_changed = plan.changes_since(data.get("plan", ""))
             messages.warning(request, "Nothing was saved. What this payment covers has changed since you "
                                       "saw it – please check it again.")
         else:
             messages.success(request, f"Saved. Added: {payment}")
-            return redirect("planned" if paying else request.get_full_path())
+            return redirect("planned" if paying else here(request))
+    if request.method == "POST":
+        # Shown after a redirect, from what was sent: the ticks as they are now, and what changed.
+        keep = {k: v for k, v in data.lists() if k not in ("csrfmiddlewaretoken", "confirm", "recalculate")}
+        request.session[PREVIEW] = {"data": keep, "changed": sorted(changed_debts),
+                                    "leftover_changed": leftover_changed}
+        return redirect(here(request, preview="1"))
+    if (shown := request.session.get(PREVIEW)) and "preview" in request.GET:
+        changed_debts, leftover_changed = set(shown["changed"]), shown["leftover_changed"]
     plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
     return render(request, "sheetapp/confirm_payment.html", {
         "form": form, "payment": payment, "plan": plan, "paying": paying, "ticks_key": ticks_key(payment),
@@ -220,11 +270,11 @@ def ticks_key(payment):
     return f"{payment.payer_id}-{payment.recipient_id}"
 
 
-def kept_ticks(request):
+def kept_ticks(data):
     """Back from the payment confirmation: the debts ticked there, to send along with the form again."""
-    if "back" not in request.POST or "choosing" not in request.POST:
+    if "back" not in data or "choosing" not in data:
         return None
-    return {"debts": request.POST.getlist("debts"), "key": request.POST.get("ticked_for", "")}
+    return {"debts": data.getlist("debts"), "key": data.get("ticked_for", "")}
 
 
 def confirm_split(request, form, purchase=None):
@@ -263,6 +313,12 @@ def cancel_transaction(request, pk):
     return _change_transaction(request, pk, cancelling=True)
 
 
+def history_url(request, transaction):
+    """The history with the filters it had when Correct or Cancel was clicked (?back=), on this transaction's row."""
+    back = request.GET.get("back", "").split("#")[0]
+    return f"{reverse('transactions')}{'?' + back if back else ''}#t-{transaction.pk}"
+
+
 def _change_transaction(request, pk, *, cancelling):
     transaction = own_transaction(request, pk)
     form_class = CancelForm if cancelling else CorrectionForm
@@ -276,9 +332,9 @@ def _change_transaction(request, pk, *, cancelling):
             form.add_error(None, e)
         else:
             messages.success(request, f"Saved. {correction}")
-            return redirect("transactions")
+            return redirect(history_url(request, transaction))
     return render(request, "sheetapp/correct.html", {
-        "form": form, "transaction": transaction, "cancelling": cancelling,
+        "form": form, "transaction": transaction, "cancelling": cancelling, "back_url": history_url(request, transaction),
         "effects": cancel_effects(transaction) if cancelling else None,
     })
 

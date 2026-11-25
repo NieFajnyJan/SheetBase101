@@ -49,7 +49,7 @@
     {% endif %}
     {{ form.as_p }}
     <button class="btn">{% if cancelling %}Cancel transaction{% else %}Save correction{% endif %}</button>
-    <a href="{% url 'transactions' %}">Back</a>
+    <a href="{{ back_url }}">Back</a>
   </form>
   {% endwith %}
 {% endblock %}
