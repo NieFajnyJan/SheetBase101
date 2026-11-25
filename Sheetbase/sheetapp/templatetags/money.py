@@ -8,11 +8,15 @@ from django.utils.html import format_html
 register = template.Library()
 
 
+def amount_text(value, space="\u00a0"):
+    """Decimal("-1234.5") -> "−1 234,50": grouped thousands, a decimal comma and a real minus sign."""
+    return f"{Decimal(value):,.2f}".replace(",", space).replace(".", ",").replace("-", "\u2212")
+
+
 @register.filter
 def zl(value):
     """Decimal("1234.5") -> "1 234,50 zł" (non-breaking spaces, so it never wraps)."""
-    text = f"{Decimal(value):,.2f}".replace(",", " ").replace(".", ",")
-    return f"{text} zł"
+    return f"{amount_text(value)}\u00a0zł"
 
 
 @register.filter

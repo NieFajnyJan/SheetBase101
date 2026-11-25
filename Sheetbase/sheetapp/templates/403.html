@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+
+{% block title %}Not allowed · SheetBase{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h1>You can't do that</h1>
+    {# Why, when the page said: e.g. only whoever added a transaction can correct it. #}
+    {% if exception %}<p>{{ exception }}</p>{% endif %}
+    <p>Nothing was changed.</p>
+    <p><a href="{% url 'transactions' %}">Transactions</a> · <a href="{% url 'planned' %}">Debts</a> · <a href="{% url 'summary' %}">Summary</a></p>
+  </div>
+{% endblock %}

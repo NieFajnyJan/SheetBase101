@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+
+{% block title %}Not found · SheetBase{% endblock %}
+
+{% block content %}
+  <div class="card">
+    <h1>This page doesn't exist</h1>
+    <p>The link may be old, or what it pointed to was deleted.</p>
+    <p><a href="{% url 'transactions' %}">Transactions</a> · <a href="{% url 'planned' %}">Debts</a> · <a href="{% url 'summary' %}">Summary</a></p>
+  </div>
+{% endblock %}

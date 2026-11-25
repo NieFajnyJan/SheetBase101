@@ -32,14 +32,14 @@
     <p>{{ plan.amount|zl }} ÷ {{ plan.shares|length }} {{ plan.shares|length|pluralize:"person,people" }} =
       <strong>{% if plan.lowest == plan.highest %}{{ plan.lowest|zl }}{% else %}{{ plan.lowest|zl }}–{{ plan.highest|zl }}{% endif %} each</strong></p>
     {% if plan.lowest != plan.highest %}
-      <p class="muted">It doesn't divide evenly, so the leftover grosze go to people drawn by lot.</p>
+      <p class="muted">It doesn't divide evenly, so the extra 0,01&nbsp;zł amounts go to people drawn by lot.</p>
     {% endif %}
 
     <ul class="shares">
       {% for share in plan.shares %}
         <li>
           {% if share.member == plan.creditor %}
-            <span class="who own">{{ share.member }}’s own share – no planned transaction</span>
+            <span class="who own">{{ share.member }}’s own share – no debt</span>
           {% else %}
             <span class="who">{{ share.member }} owes {{ plan.creditor }}</span>
           {% endif %}
@@ -48,7 +48,7 @@
       {% endfor %}
     </ul>
 
-    <p class="sum">Adds {{ plan.owed|length }} planned transaction{{ plan.owed|length|pluralize }}:
+    <p class="sum">Adds {{ plan.owed|length }} debt{{ plan.owed|length|pluralize }}:
       <strong>{{ plan.owed_total|zl }}</strong> owed to {{ plan.creditor }}.</p>
 
     <p class="muted">Nothing is saved until you click Confirm.</p>

@@ -10,5 +10,5 @@
     <button class="btn btn-social" type="submit">Continue with {{ provider.name }}</button>
   </form>
 {% empty %}
-  <p class="msg">No login providers are configured yet – set them up in <code>.env</code>.</p>
+  <p class="msg msg-warning">Logging in isn't possible right now. Ask whoever looks after SheetBase in your office to set it up.</p>
 {% endfor %}

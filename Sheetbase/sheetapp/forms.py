@@ -1,7 +1,7 @@
 import json
 import re
 import uuid
-from datetime import date
+from decimal import Decimal
 
 from django import forms
 from django.core.exceptions import ValidationError
@@ -20,7 +20,8 @@ from .models import (
 )
 from .payments import loan_edits
 from .splits import GROSZ, plan_split
-from .templatetags.money import show
+from .summary import MONTH_NAMES
+from .templatetags.money import amount_text, show
 
 # Dates are shown as dd.mm.yyyy (20.11.2026): a four-digit year, and the order Polish users expect.
 # Typed, slashes and two-digit years work too (each format needs one separator throughout).
@@ -31,8 +32,22 @@ DATE_HINT = "dd.mm.yyyy, e.g. 20.11.2026"
 DATE_WIDGET = forms.DateInput(format=DATE_FORMATS[0], attrs={"class": "datepicker", "autocomplete": "off"})
 
 
+class AmountInput(forms.TextInput):
+    """Shows a saved amount as the tables do – 1 234,50, not 1234.50. What was typed is shown as typed.
+    A text box, not type=number: number boxes reject a comma in some browsers."""
+
+    def __init__(self, attrs=None):
+        super().__init__({"inputmode": "decimal", **(attrs or {})})
+
+    def format_value(self, value):
+        if isinstance(value, (Decimal, int, float)):
+            return amount_text(value, space=" ")
+        return super().format_value(value)
+
+
 class AmountField(forms.DecimalField):
     """Accepts 12.49 and 12,49 – Polish users type commas – and digits grouped with spaces (1 234,50)."""
+    widget = AmountInput
 
     def to_python(self, value):
         if isinstance(value, str):
@@ -45,9 +60,9 @@ class TransactionForm(forms.ModelForm):
         model = Transaction
         fields = CORRECTABLE_FIELDS
         field_classes = {"amount": AmountField}
-        help_texts = {"date": DATE_HINT}
-        # A text box, not type=number: number boxes reject a comma in some browsers.
-        widgets = {"date": DATE_WIDGET, "amount": forms.TextInput(attrs={"inputmode": "decimal"})}
+        # The same form adds refunds, repayments and loans, not only purchases.
+        help_texts = {"date": DATE_HINT, "description": "What it was for, e.g. what was bought."}
+        widgets = {"date": DATE_WIDGET, "amount": AmountInput}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -143,7 +158,7 @@ class CorrectionForm(UpToDateMixin, TransactionForm):
                 label="The loan it made", required=False, widget=forms.RadioSelect,
                 choices=[("follow", "Change the loan to match the correction"), ("keep", "Keep the loan as it is")],
                 # format_html: help text isn't escaped when shown, and the names and description are typed by users.
-                help_text=format_html("Changed on the Planned page since: now {} owes {} {} for “{}”. Only needed "
+                help_text=format_html("Changed on the Debts page since: now {} owes {} {} for “{}”. Only needed "
                                       "when you correct what was changed there.",
                                       loan.debtor, loan.creditor, show(loan.amount), loan.description))
             self.order_fields(CORRECTABLE_FIELDS + ["loan", "reason"])
@@ -208,7 +223,7 @@ class PlannedTransactionForm(forms.ModelForm):
         model = PlannedTransaction
         fields = ["debtor", "creditor", "amount", "description", "tag"]
         field_classes = {"amount": AmountField}
-        widgets = {"amount": forms.TextInput(attrs={"inputmode": "decimal"})}
+        widgets = {"amount": AmountInput}
 
 
 class EditPlannedForm(UpToDateMixin, PlannedTransactionForm):
@@ -258,7 +273,7 @@ class SplitMixin:
         if split_amount:
             self.fields["split_amount"] = AmountField(
                 label="Amount to split", required=False, max_digits=10, decimal_places=2,
-                min_value=GROSZ, widget=forms.TextInput(attrs={"inputmode": "decimal"}),
+                min_value=GROSZ, widget=AmountInput,
                 help_text="Leave empty to split the whole amount.")
             # Shown on the “?” next to the label.
             self.fields["split_amount"].hint = (
@@ -359,18 +374,18 @@ class AddPlannedForm(OnceMixin, SplitMixin, PlannedTransactionForm):
         return data
 
 
-MONTHS = [(m, date(2000, m, 1).strftime("%B")) for m in range(1, 13)]
+MONTHS = list(enumerate(MONTH_NAMES, start=1))
 
 
 class HistoryFilterForm(forms.Form):
     """Narrows the history. All fields optional; an empty form shows everything."""
 
-    payer = forms.ModelChoiceField(User.objects.all(), required=False, label="paid by", empty_label="anyone")
-    recipient = forms.ModelChoiceField(User.objects.all(), required=False, label="paid to", empty_label="anyone")
+    payer = forms.ModelChoiceField(User.objects.all(), required=False, label="Paid by", empty_label="anyone")
+    recipient = forms.ModelChoiceField(User.objects.all(), required=False, label="Paid to", empty_label="anyone")
     year = forms.TypedChoiceField(coerce=int, required=False, empty_value=None)
     month = forms.TypedChoiceField(coerce=int, required=False, empty_value=None,
                                    choices=[("", "whole year")] + MONTHS)
-    hide_cancelled = forms.BooleanField(required=False, label="hide cancelled")
+    hide_cancelled = forms.BooleanField(required=False, label="Hide cancelled")
 
     def __init__(self, *args, years=(), **kwargs):
         """`years`: the years transactions are dated in; this year is always offered."""
@@ -387,7 +402,7 @@ class HistoryFilterForm(forms.Form):
     def applied(self):
         """The filters in use, in words: ["paid by Ola", "November 2026", "cancelled hidden"]."""
         data = self.cleaned_data
-        words = [f"{self.fields[n].label} {data[n]}" for n in ("payer", "recipient") if data.get(n)]
+        words = [f"{self.fields[n].label.lower()} {data[n]}" for n in ("payer", "recipient") if data.get(n)]
         if data.get("year"):
             words.append(f"{dict(MONTHS)[data['month']]} {data['year']}" if data.get("month") else str(data["year"]))
         if data.get("hide_cancelled"):

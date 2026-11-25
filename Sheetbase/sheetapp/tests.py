@@ -244,7 +244,7 @@ class HeaderTests(TestCase):
         return html[html.index('<nav aria-label="Main">'):html.index("</nav>")]
 
     def test_the_page_you_are_on_is_marked(self):
-        for url, current in (("transactions", "Transactions"), ("planned", "Planned"), ("summary", "Summary")):
+        for url, current in (("transactions", "Transactions"), ("planned", "Debts"), ("summary", "Summary")):
             nav = self.nav(reverse(url))
             self.assertEqual(nav.count('aria-current="page"'), 1)
             self.assertIn(f'aria-current="page">{current}</a>', nav)
@@ -413,6 +413,68 @@ class KeepYourPlaceTests(TestCase):
         self.assertTrue(form.fields["amount"].disabled)
         self.assertIn("this purchase was split between people", form.fields["amount"].help_text)
         self.assertFalse(form.fields["description"].disabled)
+
+
+class SameWordsAndNumbersTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.client.force_login(self.jan)
+
+    def test_negative_amounts_have_a_real_minus_sign(self):
+        self.assertEqual(zl(Decimal("-1234.5")), "\u22121\u00a0234,50\u00a0zł")
+
+    def test_an_amount_being_edited_looks_like_in_the_tables_and_saves_back(self):
+        d = PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("23523.00"),
+                                              description="Biurko", created_by=self.jan)
+        url = reverse("edit_planned", args=[d.pk])
+        self.assertContains(self.client.get(url), 'value="23 523,00"')
+        page = self.client.post(url, {"debtor": self.ola.pk, "creditor": self.jan.pk, "amount": "23 523,00",
+                                      "description": "Biurko"}, follow=True)
+        self.assertContains(page, "Saved. Changed: Ola owes Jan 23\u00a0523,00\u00a0zł – Biurko")
+
+    def test_messages_show_amounts_as_the_tables_do(self):
+        page = self.client.post(reverse("transactions"), {
+            "amount": "1234,5", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "Biurko",
+            "date": today().strftime("%d.%m.%Y")}, follow=True)
+        self.assertContains(page, "Biurko – 1\u00a0234,50\u00a0zł (Jan → Shop)")
+
+    def test_open_debts_are_called_debts(self):
+        nav = self.client.get(reverse("planned")).content.decode()
+        self.assertIn('aria-current="page">Debts</a>', nav)
+        self.assertIn("<h2>Add debt</h2>", nav)
+        self.assertNotIn("lanned transaction", nav[nav.index("<main>"):])
+
+    def test_description_hint_fits_payments_and_loans_too(self):
+        self.assertContains(self.client.get(reverse("transactions")), "What it was for, e.g. what was bought.")
+
+    def test_month_names_are_english_whatever_the_server_language(self):
+        from .forms import MONTHS
+        self.assertEqual(MONTHS[0], (1, "January"))
+        self.assertEqual(self.client.get(reverse("summary")).context["months"][10][0], "November")
+
+    def test_filter_labels_start_with_a_capital(self):
+        html = self.client.get(reverse("transactions")).content.decode()
+        self.assertIn('<label for="filter_payer">Paid by:</label>', html)
+
+    @override_settings(SOCIALACCOUNT_PROVIDERS=GOOGLE_NOT_CONFIGURED)
+    def test_login_without_providers_speaks_to_members(self):
+        self.client.logout()
+        page = self.client.get(reverse("login"))
+        self.assertContains(page, "Ask whoever looks after SheetBase in your office")
+        self.assertNotContains(page, ".env")
+
+    @override_settings(DEBUG=False)
+    def test_not_found_and_not_allowed_pages(self):
+        page = self.client.get("/no-such-page/")
+        self.assertEqual(page.status_code, 404)
+        self.assertContains(page, "This page doesn't exist", status_code=404)
+        t = Transaction.objects.create(amount=Decimal("1.00"), payer=self.ola, recipient=self.shop,
+                                       created_by=self.ola, description="x")
+        page = self.client.get(reverse("correct_transaction", args=[t.pk]))
+        self.assertContains(page, "Only whoever added a transaction can correct it", status_code=403)
+        self.assertContains(page, "Nothing was changed.", status_code=403)
 
 
 class TransactionModelTests(TestCase):
@@ -2228,7 +2290,7 @@ class PlannedPageTests(TestCase):
 
     def test_switch_between_add_forms(self):
         self.assertContains(self.client.get(self.url), "Done transactions →")
-        self.assertContains(self.client.get(reverse("transactions")), "Planned transactions →")
+        self.assertContains(self.client.get(reverse("transactions")), "Debts →")
 
     def test_add(self):
         self.assertRedirects(self.add(), self.url)
@@ -2373,9 +2435,9 @@ class PlannedPageTests(TestCase):
         d = self.debt(settled_by=pay, settled_at=timezone.now())
         page = self.client.get(self.edit_url(d), follow=True)
         self.assertRedirects(page, self.url)
-        self.assertContains(page, "This planned transaction has been paid in the meantime")
+        self.assertContains(page, "This debt has been paid in the meantime")
         page = self.client.post(self.delete_url(d), follow=True)
-        self.assertContains(page, "Nothing was deleted. This planned transaction has been paid")
+        self.assertContains(page, "Nothing was deleted. This debt has been paid")
         self.assertTrue(PlannedTransaction.objects.filter(pk=d.pk).exists())
 
     def test_edit_of_a_debt_deleted_in_another_tab_goes_back_with_a_warning(self):
@@ -2386,12 +2448,12 @@ class PlannedPageTests(TestCase):
         page = self.client.post(url, {"debtor": self.ola.pk, "creditor": self.jan.pk,
                                                    "amount": "12,50", "description": "Pizza"}, follow=True)
         self.assertRedirects(page, self.url)
-        self.assertContains(page, '<p class="msg msg-warning" role="alert">Nothing was saved. This planned '
-                                  'transaction was deleted in the meantime')
+        self.assertContains(page, '<p class="msg msg-warning" role="alert">Nothing was saved. This debt was deleted '
+                                  'in the meantime')
         self.assertFalse(PlannedTransaction.objects.exists())
         # Opening it from an old page says so too, without "Nothing was saved".
         page = self.client.get(url, follow=True)
-        self.assertContains(page, "role=\"alert\">This planned transaction was deleted in the meantime")
+        self.assertContains(page, "role=\"alert\">This debt was deleted in the meantime")
 
     def test_deleting_twice_goes_back_with_a_warning(self):
         d = self.debt()
@@ -2399,7 +2461,7 @@ class PlannedPageTests(TestCase):
         self.client.post(self.delete_url(d), {"rows": shown})
         page = self.client.post(self.delete_url(d), {"rows": shown}, follow=True)
         self.assertRedirects(page, self.url)
-        self.assertContains(page, "Nothing was deleted. This planned transaction was deleted in the meantime")
+        self.assertContains(page, "Nothing was deleted. This debt was deleted in the meantime")
 
     def test_delete_takes_the_group(self):
         a, b = self.debt(), self.debt(debtor=self.ewa)
@@ -2607,9 +2669,9 @@ class MarkPaidTests(TestCase):
         d.delete()
         page = self.client.get(url, follow=True)
         self.assertRedirects(page, reverse("planned"))
-        self.assertContains(page, "This planned transaction was deleted in the meantime")
+        self.assertContains(page, "This debt was deleted in the meantime")
         page = self.client.post(url, data, follow=True)
-        self.assertContains(page, "Nothing was saved. This planned transaction was deleted")
+        self.assertContains(page, "Nothing was saved. This debt was deleted")
         self.assertFalse(Transaction.objects.exists())
 
     def test_admin_marks_selected_paid_one_payment_per_pair(self):

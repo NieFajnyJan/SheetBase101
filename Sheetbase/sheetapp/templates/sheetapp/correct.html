@@ -32,7 +32,7 @@
           </div>
         {% endif %}
         {% if e.reopened or e.removed %}
-          <p>Cancelling it also changes the planned transactions:</p>
+          <p>Cancelling it also changes these debts:</p>
           {% if e.reopened %}
             <p class="effect-head">Owed again – it paid them:</p>
             <ul>{% for d in e.reopened %}<li>{{ d.debtor }} owes {{ d.creditor }} {{ d.amount|zl }} – {{ d.description }}</li>{% endfor %}</ul>

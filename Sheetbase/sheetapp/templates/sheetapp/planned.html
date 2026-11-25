@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% load money %}
 
-{% block title %}Planned · SheetBase{% endblock %}
+{% block title %}Debts · SheetBase{% endblock %}
 
 {% block extra_head %}
 <style>
@@ -35,11 +35,11 @@
 {% endblock %}
 
 {% block content %}
-  <h1 class="visually-hidden">Planned transactions</h1>
+  <h1 class="visually-hidden">Debts</h1>
   <div class="forms">
     <form class="card form-card" method="post">
       {% csrf_token %}
-      <h2>Add planned transaction</h2>
+      <h2>Add debt</h2>
       <p class="muted">A debt: someone owes someone money. Nothing has been paid yet.</p>
       {% include "sheetapp/_add_form_fields.html" %}
       <button class="btn">Add</button>
@@ -71,7 +71,7 @@
     {% endwith %}
   </div>
 
-  <h2 class="section">Open planned transactions</h2>
+  <h2 class="section">Open debts</h2>
   {% if debts %}
     <div class="table-wrap">
       <table>
@@ -93,6 +93,6 @@
       </table>
     </div>
   {% else %}
-    <p class="card muted">No open planned transactions – nobody owes anything.</p>
+    <p class="card muted">No open debts – nobody owes anything.</p>
   {% endif %}
 {% endblock %}
