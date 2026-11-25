@@ -842,11 +842,30 @@ class TransactionListTests(TestCase):
         self.assertNotIn(".submit()", html)
         self.assertLess(html.index('name="hide_cancelled"'), html.index('<button class="btn">Filter</button>'))
 
-    def test_amount_comes_right_after_the_date(self):
+    def test_amount_comes_after_who_paid_whom_as_for_debts(self):
         self.make("12.00", self.jan, self.shop)
-        html = self.client.get(self.url).content.decode()
-        head = html[html.index("<thead>"):html.index("</thead>")]
-        self.assertEqual(re.findall(r"<th[^>]*>([^<]*)</th>", head)[:3], ["Date paid", "Amount", "Paid by"])
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                          description="Kawa", created_by=self.jan)
+
+        def columns(url):
+            html = self.client.get(url).content.decode()
+            return re.findall(r"<th[^>]*>([^<]*)</th>", html[html.index("<thead>"):html.index("</thead>")])
+
+        def fields(url):  # of the add form, the page's first form
+            html = self.client.get(url).content.decode()
+            form = html[html.index('<form class="card form-card"'):]
+            return re.findall(r'<(?:input|select)[^>]*name="(payer|recipient|debtor|creditor|amount|description)"',
+                              form[:form.index("</form>")])
+
+        self.assertEqual(columns(self.url)[:5], ["Date paid", "Paid by", "Paid to", "Amount", "Description"])
+        self.assertEqual(columns(reverse("planned"))[:4], ["Owes", "Owed to", "Amount", "What for"])
+        # The total sits under Amount: the cells before it span the columns before Amount.
+        for url, before in ((self.url, 3), (reverse("planned"), 2)):
+            html = self.client.get(url).content.decode()
+            foot = html[html.rindex("<tfoot>"):html.rindex("</tfoot>")]  # the list is the page's last table
+            self.assertIn(f'<td colspan="{before}">Total</td><td class="num">', foot, msg=url)
+        self.assertEqual(fields(self.url), ["payer", "recipient", "amount", "description"])
+        self.assertEqual(fields(reverse("planned")), ["debtor", "creditor", "amount", "description"])
 
 
 class DoneTransactionIsFinalTests(TestCase):
