@@ -75,7 +75,7 @@
             <tr id="t-{{ t.pk }}" class="{% if t.is_corrected %}has-history{% endif %}{% if t.is_cancelled %} cancelled{% endif %}"
                 {% if t.is_corrected %}data-history="history-{{ t.pk }}"{% endif %}>
               <td class="val">{{ c.date|day }}</td><td class="num val">{{ c.amount|zl }}</td>
-              <td class="val">{{ c.payer }}</td><td class="val">{{ c.recipient }}</td>
+              <td class="val">{{ c.payer|party }}</td><td class="val">{{ c.recipient|party }}</td>
               <td class="desc"><span class="val">{{ c.description }}</span>
                 {# Show or hide its history. The name starts with the visible text, so it can be said aloud to click it. Without JavaScript the history simply stays shown. #}
                 {% if t.is_cancelled %}<button type="button" class="tag tag-cancelled" aria-controls="history-{{ t.pk }}" aria-expanded="true" aria-label="Cancelled – history of changes">Cancelled</button>
@@ -107,7 +107,7 @@
                       </li>
                     {% endfor %}
                     <li>
-                      <strong>Original</strong> · {{ t.date|day }} · {{ t.payer }} → {{ t.recipient }} · {{ t.description }} · {{ t.amount|zl }}
+                      <strong>Original</strong> · {{ t.date|day }} · {{ t.payer|party }} → {{ t.recipient|party }} · {{ t.description }} · {{ t.amount|zl }}
                       <div class="who">added by {{ t.created_by }}, {{ t.created_at|date:"d.m.Y H:i" }}</div>
                     </li>
                   </ol>

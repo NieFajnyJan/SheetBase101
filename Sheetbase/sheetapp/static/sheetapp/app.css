@@ -233,6 +233,8 @@ tr:target > td, tr:target > th { background: var(--highlight); }
 button.tag { cursor: pointer; transition: filter var(--ease); }
 button.tag:hover { filter: brightness(.95); }
 .tag-cancelled { background: var(--danger-soft); color: var(--danger); box-shadow: inset 0 0 0 1px #fecaca; }
+/* Next to a shop's name, so a shop isn't taken for a person. */
+.tag-shop { font-size: .7rem; padding: 0 .45rem; color: var(--muted); vertical-align: .1em; }
 
 /* ---------- Shared bits ---------- */
 /* What changed since the page was opened: in words as well as colour. */

@@ -19,9 +19,24 @@ def zl(value):
     return f"{amount_text(value)}\u00a0zł"
 
 
+def party_label(user):
+    """A user's name in plain text (a dropdown option): shops marked, so they aren't taken for people."""
+    return f"{user} (shop)" if user.is_shop else str(user)
+
+
+@register.filter
+def party(user):
+    """Who paid or was paid: the name, with a “shop” pill next to a shop's."""
+    if getattr(user, "is_shop", False):
+        return format_html('{} <span class="tag tag-shop">shop</span>', user)
+    return user
+
+
 @register.filter
 def show(value):
-    """A field value in a correction's history: amounts in zł, dates as dd.mm.yyyy."""
+    """A field value in a correction's history: amounts in zł, dates as dd.mm.yyyy, shops marked."""
+    if getattr(value, "is_shop", False):
+        return party(value)
     if isinstance(value, Decimal):
         return zl(value)
     if isinstance(value, date):

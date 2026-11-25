@@ -21,7 +21,7 @@ from .models import (
 from .payments import loan_edits
 from .splits import GROSZ, plan_split
 from .summary import MONTH_NAMES
-from .templatetags.money import amount_text, show
+from .templatetags.money import amount_text, party_label, show
 
 # Dates are shown as dd.mm.yyyy (20.11.2026): a four-digit year, and the order Polish users expect.
 # Typed, slashes and two-digit years work too (each format needs one separator throughout).
@@ -55,6 +55,16 @@ class AmountField(forms.DecimalField):
         return super().to_python(value)
 
 
+def group_shops(field):
+    """Lists a payer/recipient dropdown in two groups, Members then Shops, so a shop isn't taken for a
+    person. (An option can't hold the pill the tables show; each shop also keeps “(shop)” after its name.)"""
+    users = list(field.queryset)
+    groups = [("Members", [(u.pk, party_label(u)) for u in users if not u.is_shop]),
+              ("Shops", [(u.pk, party_label(u)) for u in users if u.is_shop])]
+    empty = [("", field.empty_label)] if field.empty_label is not None else []
+    field.widget.choices = empty + [(name, options) for name, options in groups if options]
+
+
 class TransactionForm(forms.ModelForm):
     class Meta:
         model = Transaction
@@ -76,6 +86,8 @@ class TransactionForm(forms.ModelForm):
         # Which combinations make sense, next to the two lists (one side is always a member).
         self.fields["payer"].help_text = "A member – or the shop, when it pays money back (a return)."
         self.fields["recipient"].help_text = "The shop, for a purchase – or the member paid."
+        for name in ("payer", "recipient"):
+            group_shops(self.fields[name])
 
 
 class UpToDateMixin:
@@ -392,6 +404,8 @@ class HistoryFilterForm(forms.Form):
         """`years`: the years transactions are dated in; this year is always offered."""
         super().__init__(*args, **kwargs)
         years = sorted({timezone.localdate().year, *years}, reverse=True)
+        for name in ("payer", "recipient"):
+            group_shops(self.fields[name])
         self.fields["year"].choices = [("", "any")] + [(y, y) for y in years]
 
     def clean(self):

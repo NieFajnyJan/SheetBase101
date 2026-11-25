@@ -14,7 +14,7 @@
     <input type="hidden" name="ticked_for" value="{{ ticks_key }}">
 
     <h1>Confirm payment</h1>
-    <p><strong>{{ payment.date|day }} · {{ payment.payer }} → {{ payment.recipient }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
+    <p><strong>{{ payment.date|day }} · {{ payment.payer|party }} → {{ payment.recipient|party }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
     {% if plan.debts %}
       {# A group of tick boxes: the question above them is its legend, read out with each box. #}
