@@ -288,7 +288,7 @@ def confirm_split(request, form, purchase=None):
             messages.info(request, "Not saved again. This split was already added.")
         else:
             added = f"{purchase} and " if purchase else ""
-            messages.success(request, f"Saved. Added: {added}{len(shares)} planned transaction{'s' if len(shares) != 1 else ''}"
+            messages.success(request, f"Saved. Added: {added}{len(shares)} debt{'s' if len(shares) != 1 else ''}"
                                       f" owed to {plan.creditor}.")
         return redirect(request.get_full_path())
     return render(request, "sheetapp/confirm_split.html", {"form": form, "plan": plan, "purchase": purchase})
@@ -386,7 +386,7 @@ def open_debt(request, pk, nothing_done="Nothing was saved."):
     if debt is None or debt.is_settled:
         what = "was deleted" if debt is None else "has been paid"
         start = f"{nothing_done} " if request.method == "POST" else ""
-        messages.warning(request, f"{start}This planned transaction {what} in the meantime (maybe in another tab), "
+        messages.warning(request, f"{start}This debt {what} in the meantime (maybe in another tab), "
                                   "so it can't be changed any more.")
         raise DebtGone
     return debt
@@ -429,7 +429,7 @@ def delete_planned(request, pk):
         except ValidationError as e:  # someone paid in the meantime
             problems = e.messages
         else:
-            messages.success(request, f"Deleted {deleted} planned transaction{'s' if deleted != 1 else ''}.")
+            messages.success(request, f"Deleted {deleted} debt{'s' if deleted != 1 else ''}.")
             return redirect("planned")
     return render(request, "sheetapp/planned_delete.html", {
         "rows": rows, "problems": problems, "signature": rows_signature(rows), "changed": changed})

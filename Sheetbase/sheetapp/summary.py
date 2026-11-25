@@ -4,8 +4,6 @@ Done transactions only, with their corrected values; cancelled ones don't count.
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
-from datetime import date
-
 from django.db.models import Max, Min, Sum
 from django.db.models.functions import ExtractMonth
 from django.utils import timezone
@@ -13,6 +11,9 @@ from django.utils import timezone
 from .models import Transaction, User
 
 ZERO = Decimal("0.00")
+# In English whatever language the server runs in (strftime("%B") would follow it).
+MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
+               "November", "December"]
 
 
 @dataclass
@@ -140,7 +141,7 @@ def month_by_month(this_year):
     started yet, last year)."""
     today = timezone.localdate()
     now, before = monthly_spent(this_year), monthly_spent(this_year - 1)
-    return [(date(2000, m, 1).strftime("%B"), now[m - 1] if (this_year, m) <= (today.year, today.month) else None,
+    return [(MONTH_NAMES[m - 1], now[m - 1] if (this_year, m) <= (today.year, today.month) else None,
              before[m - 1]) for m in range(1, 13)]
 
 

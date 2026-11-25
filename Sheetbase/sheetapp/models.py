@@ -13,6 +13,8 @@ from django.utils.functional import cached_property
 
 from audit.querysets import AuditedQuerySet
 
+from .templatetags.money import zl
+
 # Shops are users with is_shop=True that can't log in; purchases are paid to them.
 # This one is created in migration 0003; more can be added on the Transactions page.
 SHOP_USERNAME = "shop"
@@ -159,7 +161,7 @@ class Transaction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.date:%d.%m.%Y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
+        return f"{self.date:%d.%m.%Y}: {self.description} – {zl(self.amount)} ({self.payer} → {self.recipient})"
 
     def clean(self):
         check_parties(self)
@@ -270,7 +272,7 @@ class TransactionCorrection(models.Model):
 
     def __str__(self):
         what = "Cancelled" if self.cancelled else "Corrected"
-        return f"{what}: {self.date:%d.%m.%Y}: {self.description} – {self.amount} zł ({self.payer} → {self.recipient})"
+        return f"{what}: {self.date:%d.%m.%Y}: {self.description} – {zl(self.amount)} ({self.payer} → {self.recipient})"
 
     def clean_fields(self, exclude=None):
         # An old date may stay: correcting the amount of a transaction older than MAX_YEARS_BACK keeps its date.
@@ -496,7 +498,7 @@ class PlannedTransaction(models.Model):
         ]
 
     def __str__(self):
-        return f"{self.debtor} owes {self.creditor} {self.amount} zł – {self.description}"
+        return f"{self.debtor} owes {self.creditor} {zl(self.amount)} – {self.description}"
 
     @property
     def is_settled(self):

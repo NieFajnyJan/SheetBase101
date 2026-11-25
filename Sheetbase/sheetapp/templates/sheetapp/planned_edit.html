@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 
-{% block title %}Edit planned transaction · SheetBase{% endblock %}
+{% block title %}Edit debt · SheetBase{% endblock %}
 
 {% block content %}
   <form class="card" method="post">
     {% csrf_token %}
-    <h1>Edit planned transaction</h1>
+    <h1>Edit debt</h1>
     <p class="muted">Fix what was entered wrong. To record that it was paid, add a payment on the Transactions page instead.</p>
     {{ form.as_p }}
     <button class="btn">Save</button>
