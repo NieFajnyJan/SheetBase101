@@ -199,6 +199,7 @@ class CancelForm(UpToDateMixin, forms.ModelForm):
     class Meta:
         model = TransactionCorrection
         fields = ["reason"]
+        help_texts = {"reason": "Why it's being cancelled."}
 
     def __init__(self, *args, original, **kwargs):
         super().__init__(*args, **kwargs)

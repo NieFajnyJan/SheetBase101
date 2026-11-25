@@ -1,32 +1,9 @@
 {% extends "base.html" %}
 {% load money %}
 
+{% block body_class %}page-confirm{% endblock %}
 {% block title %}Confirm payment · SheetBase{% endblock %}
 
-{% block extra_head %}
-<style>
-  .debts { border: 0; margin: 0; padding: 0; min-width: 0; }
-  .debts legend { padding: 0; margin: .8rem 0 0; }
-  .covers { list-style: none; padding: 0; margin: .5rem 0 1rem; }
-  .covers li { border-bottom: 1px dashed #dde; }
-  .covers label { display: flex; align-items: baseline; gap: .6rem; font-weight: 400; margin: 0; padding: .4rem 0; cursor: pointer; }
-  .covers .what { flex: 1; }
-  .covers .origin { display: block; font-size: .85rem; color: var(--muted); }
-  .covers .status { display: block; min-height: 1.3em; font-size: .85rem; color: var(--muted); }
-  .covers .status.paid { color: #1e7a3c; }
-  .covers .status.partly, .covers .status.ran_out { color: #a05a00; }
-  .num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-  .leftover { background: #f3f4f7; border-radius: 6px; padding: .6rem .8rem; min-height: 2.6em; }
-  .leftover .muted { display: block; }
-  .actions { display: flex; gap: .6rem; margin-top: 1.2rem; flex-wrap: wrap; }
-  .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
-  /* What changed since Confirm was clicked: in words as well as colour. */
-  .changed { background: #fff4e0; }
-  .updating { min-height: 1.3em; margin: .4rem 0 0; color: var(--muted); }
-  .covers[aria-busy="true"] { opacity: .6; cursor: progress; }
-  .changed-note { display: block; font-size: .85rem; font-weight: 600; color: #7a4100; }
-</style>
-{% endblock %}
 
 {% block content %}
   <form class="card" method="post" id="confirm-form">
@@ -78,11 +55,11 @@
 
     {% with left=plan.leftover %}
       {% if left %}
-        <p class="leftover{% if leftover_changed %} changed{% endif %}">Leftover: <strong>{{ left.debtor }} owes {{ left.creditor }} {{ left.amount|zl }}</strong>
+        <p class="panel leftover{% if leftover_changed %} changed{% endif %}">Leftover: <strong>{{ left.debtor }} owes {{ left.creditor }} {{ left.amount|zl }}</strong>
           <span class="muted">{{ left.description }}</span>
           {% if leftover_changed %}<span class="changed-note">Changed – check it</span>{% endif %}</p>
       {% else %}
-        <p class="leftover{% if leftover_changed %} changed{% endif %}">No leftover<span class="muted">The debts are paid exactly.</span>
+        <p class="panel leftover{% if leftover_changed %} changed{% endif %}">No leftover<span class="muted">The debts are paid exactly.</span>
           {% if leftover_changed %}<span class="changed-note">Changed – check it</span>{% endif %}</p>
       {% endif %}
     {% endwith %}

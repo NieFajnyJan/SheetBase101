@@ -398,7 +398,7 @@ class KeepYourPlaceTests(TestCase):
         self.assertContains(history, f'{reverse("cancel_transaction", args=[t.pk])}?back={back}"')
         target = f"{self.url}?payer={self.jan.pk}&year={today().year}#t-{t.pk}"
         url = f'{reverse("correct_transaction", args=[t.pk])}?back={back}'
-        self.assertContains(self.client.get(url), f'<a href="{target.replace("&", "&amp;")}">Back</a>')
+        self.assertContains(self.client.get(url), f'<a class="btn btn-secondary" href="{target.replace("&", "&amp;")}">Back</a>')
         response = self.client.post(url, {"amount": "11.00", "payer": self.jan.pk, "recipient": self.shop.pk,
                                           "description": "Kawa", "date": today().strftime("%d.%m.%Y"),
                                           "reason": "typo"})
@@ -475,6 +475,41 @@ class SameWordsAndNumbersTests(TestCase):
         page = self.client.get(reverse("correct_transaction", args=[t.pk]))
         self.assertContains(page, "Only whoever added a transaction can correct it", status_code=403)
         self.assertContains(page, "Nothing was changed.", status_code=403)
+
+
+class OneStylesheetTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com")
+        self.ola = User.objects.create_user("ola", "ola@example.com")
+        self.client.force_login(self.jan)
+
+    def test_pages_use_the_one_stylesheet_and_have_an_icon(self):
+        from pathlib import Path
+        templates = Path(__file__).parent / "templates"
+        with_style = [str(p) for p in templates.rglob("*.html") if "<style" in p.read_text() or "style=" in p.read_text()]
+        self.assertEqual(with_style, [])
+        html = self.client.get(reverse("summary")).content.decode()
+        self.assertIn('<link rel="stylesheet" href="/static/sheetapp/app.css">', html)
+        self.assertIn('<link rel="icon" href="/static/sheetapp/favicon.svg" type="image/svg+xml">', html)
+
+    def test_the_stylesheet_has_a_print_layout(self):
+        from django.contrib.staticfiles import finders
+        css = open(finders.find("sheetapp/app.css")).read()
+        self.assertIn("@media print", css)
+
+    def test_destructive_actions_are_red_and_back_looks_the_same_everywhere(self):
+        d = PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                              description="Kawa", created_by=self.jan)
+        t = Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan,
+                                       recipient=User.objects.get(username=SHOP_USERNAME), created_by=self.jan,
+                                       description="x")
+        self.assertContains(self.client.get(reverse("delete_planned", args=[d.pk])), '<button class="btn btn-danger">Delete</button>')
+        self.assertContains(self.client.get(reverse("cancel_transaction", args=[t.pk])),
+                            '<button class="btn btn-danger">Cancel transaction</button>')
+        for url in (reverse("delete_planned", args=[d.pk]), reverse("edit_planned", args=[d.pk]),
+                    reverse("correct_transaction", args=[t.pk])):
+            self.assertContains(self.client.get(url), '<a class="btn btn-secondary" href=', msg_prefix=url)
+        self.assertContains(self.client.get(reverse("planned")), f'<a class="danger" href="{reverse("delete_planned", args=[d.pk])}">Delete</a>')
 
 
 class TransactionModelTests(TestCase):
@@ -747,7 +782,7 @@ class TransactionListTests(TestCase):
         self.assertContains(page, f"Showing: paid by jan · March {today().year}")
         # Filtering again, or clearing, comes back to the list rather than the top of the page.
         self.assertContains(page, f'action="{self.url}#done"')
-        self.assertContains(page, f'<a href="{self.url}#done">Clear</a>')
+        self.assertContains(page, f'<a class="clear" href="{self.url}#done">Clear</a>')
 
     def test_years_come_from_the_transactions(self):
         old = self.make("10.00", self.jan, self.shop)
@@ -2289,8 +2324,8 @@ class PlannedPageTests(TestCase):
         self.assertContains(self.client.get(reverse("home")), f'href="{self.url}"')
 
     def test_switch_between_add_forms(self):
-        self.assertContains(self.client.get(self.url), "Done transactions →")
-        self.assertContains(self.client.get(reverse("transactions")), "Debts →")
+        self.assertContains(self.client.get(self.url), 'Done transactions <span aria-hidden="true">→</span>')
+        self.assertContains(self.client.get(reverse("transactions")), 'Debts <span aria-hidden="true">→</span>')
 
     def test_add(self):
         self.assertRedirects(self.add(), self.url)

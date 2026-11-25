@@ -1,0 +1,376 @@
+/* SheetBase – the one stylesheet. Shared rules first, then each page's own, scoped by the class on <body>
+   (page-transactions, page-debts, page-summary, …), so a rule for one page can't change another. */
+
+/* ---------- Design tokens ---------- */
+:root {
+  /* Colours: a dark slate with an emerald accent. Text colours meet 4.5:1 on every surface below;
+     --field-border meets 3:1 on white. The bright --accent is for edges, marks and icons, never for text. */
+  --bg: #f8fafc;
+  --surface: #fff;
+  --surface-2: #f1f5f9;       /* table headers, quiet panels */
+  --surface-hover: #f8fafc;
+  --border: #e2e8f0;          /* decorative lines: cards, table rows */
+  --field-border: #7c8ba1;    /* what you type in or pick from */
+  --text: #0f172a;
+  --muted: #5b6878;           /* the one grey for secondary text: at least 5:1 everywhere it's used */
+  --brand: #0f172a;           /* header, main buttons */
+  --brand-hover: #1e293b;
+  --brand-soft: #e2e8f0;
+  --accent: #10b981;          /* emerald: the page you're on, focus on the header, coloured edges */
+  --accent-text: #047857;     /* emerald dark enough for text and links (5.5:1) */
+  --accent-soft: #ecfdf5;
+  --focus: #0f172a;
+  --income: #047857;          /* money coming in / settled */
+  --expense: #b91c1c;         /* money going out / destructive */
+  --danger: #b91c1c;
+  --danger-hover: #991b1b;
+  --danger-soft: #fef2f2;
+  --success: #047857;
+  --success-soft: #ecfdf5;
+  --warning: #b45309;         /* warning text */
+  --warning-edge: #d97706;
+  --warning-soft: #fffbeb;
+  --info: #2563eb;
+  --info-soft: #eff6ff;
+  --highlight: #fef9c3;       /* the row a link or a save brought you to */
+
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 1px 2px rgb(16 24 40 / .05), 0 1px 3px rgb(16 24 40 / .06);
+  --shadow-lg: 0 8px 24px rgb(16 24 40 / .14);
+  --ease: 150ms ease;
+}
+
+/* ---------- Base ---------- */
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--bg); color: var(--text);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  font-size: 16px; line-height: 1.5; -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3 { line-height: 1.25; font-weight: 650; letter-spacing: -.01em; }
+h1 { font-size: 1.6rem; margin: 0 0 .5rem; }
+h2 { font-size: 1.2rem; }
+h3 { font-size: 1rem; }
+a { color: var(--accent-text); text-underline-offset: 2px; text-decoration-thickness: 1px; }
+a:hover { color: var(--brand); text-decoration-thickness: 2px; }
+code { font-size: .9em; background: var(--surface-2); padding: .1em .35em; border-radius: 4px; }
+/* Hidden means hidden, also for things whose style sets a display (buttons, fields). */
+[hidden] { display: none !important; }
+.muted { color: var(--muted); }
+/* Read out by screen readers, not shown. */
+.visually-hidden { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden;
+                   clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+/* Keyboard focus: a thick ring, not just a slightly darker border. */
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+
+/* ---------- Header ---------- */
+/* Stays at the top while scrolling. Wraps instead of running off the screen: on a phone the links go onto a second row. */
+.site-header {
+  position: sticky; top: 0; z-index: 20;
+  background: var(--brand); color: #fff; box-shadow: 0 1px 0 rgb(0 0 0 / .08), 0 2px 8px rgb(16 24 40 / .12);
+}
+.site-header .inner {
+  max-width: 1100px; margin: 0 auto; padding: .55rem 1rem;
+  display: flex; flex-wrap: wrap; align-items: center; gap: .4rem 1rem;
+}
+.site-header a, .site-header button { color: #fff; text-decoration: none; }
+.site-header .brand { display: inline-flex; align-items: center; gap: .5rem; font-weight: 700; font-size: 1.1rem; margin-right: auto; }
+.site-header .brand svg { flex: none; }
+.site-header nav ul { display: flex; flex-wrap: wrap; gap: .2rem; list-style: none; margin: 0; padding: 0; }
+.site-header nav a { display: block; padding: .35rem .7rem; border-radius: var(--radius-sm); transition: background var(--ease); }
+.site-header nav a:hover { background: rgb(255 255 255 / .12); }
+/* The page you're on: underlined and bold, not only a different colour. */
+.site-header nav a[aria-current="page"] { font-weight: 700; background: rgb(255 255 255 / .12); box-shadow: inset 0 -3px 0 var(--accent); }
+.site-header .account { display: flex; align-items: center; gap: .6rem; min-width: 0; }
+/* A long name is cut short (all of it shows on hover). */
+.site-header .user { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .92; }
+.site-header form { margin: 0; }
+.site-header button {
+  background: none; border: 1px solid rgb(255 255 255 / .55); border-radius: var(--radius-sm);
+  padding: .3rem .8rem; cursor: pointer; font: inherit; transition: background var(--ease);
+}
+.site-header button:hover { background: rgb(255 255 255 / .12); }
+/* Keyboard focus on the dark header: a thick emerald ring, easy to see (7:1). */
+.site-header a:focus-visible, .site-header button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 600px) {
+  .site-header nav { order: 3; flex-basis: 100%; }
+  .site-header nav a { padding: .3rem .5rem; }
+  .site-header .user { max-width: 10ch; }
+}
+
+/* ---------- Layout ---------- */
+main { max-width: 520px; margin: 2rem auto 3rem; padding: 0 1rem; }
+body.wide main { max-width: 1100px; }
+.section-title { margin: 2.5rem 0 .75rem; font-size: 1.3rem; }
+
+/* Add form centred; a column of links and extras beside it, under it on narrow screens. */
+.forms { display: grid; grid-template-columns: 1fr minmax(0, 500px) 1fr; gap: 1.25rem; align-items: start; }
+.forms > .form-card { grid-column: 2; }
+.forms > .side { grid-column: 3; max-width: 280px; display: grid; gap: 1rem; }
+@media (max-width: 900px) {
+  .forms { grid-template-columns: minmax(0, 520px); justify-content: center; }
+  .forms > .form-card, .forms > .side { grid-column: 1; max-width: none; }
+}
+
+/* ---------- Cards ---------- */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+        box-shadow: var(--shadow); padding: 1.5rem; }
+.card > :first-child { margin-top: 0; }
+.card > :last-child { margin-bottom: 0; }
+.card h1 { font-size: 1.4rem; }
+.card h2 { font-size: 1.15rem; margin: 0 0 .25rem; }
+.card p { margin: .75rem 0; }
+/* A card that is a link (to the other page). */
+.switch { display: flex; align-items: center; justify-content: space-between; font-weight: 600;
+          color: var(--brand); text-decoration: none; padding: 1rem 1.25rem;
+          transition: background var(--ease), box-shadow var(--ease), transform var(--ease); }
+.switch:hover { background: var(--surface-hover); box-shadow: var(--shadow-lg); text-decoration: none; }
+details.card { padding: 1rem 1.25rem; }
+details.card > summary { cursor: pointer; font-weight: 600; list-style-position: inside; }
+details.card > summary:hover { color: var(--brand-hover); }
+details.card[open] > summary { margin-bottom: .5rem; }
+
+/* ---------- Forms ---------- */
+label { display: block; font-weight: 600; margin-bottom: .3rem; }
+.field, form > p { margin: 0 0 1rem; }
+input[type=text], input[type=email], input[type=password], input[type=date], input[type=number], select, textarea {
+  width: 100%; padding: .55rem .75rem; min-height: 2.6rem;
+  border: 1px solid var(--field-border); border-radius: var(--radius-sm); background: var(--surface);
+  font: inherit; color: inherit; transition: border-color var(--ease), box-shadow var(--ease);
+}
+input[type=text]:hover, input[type=email]:hover, input[type=password]:hover, select:hover, textarea:hover { border-color: var(--text); }
+input:focus-visible, select:focus-visible, textarea:focus-visible { border-color: var(--focus); }
+/* Dropdowns: the browser's own arrow is small and faint, so a bigger chevron in the text colour, and room for it. */
+select:not([multiple]) {
+  appearance: none; -webkit-appearance: none; padding-right: 2.5rem; cursor: pointer;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%230f172a' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right .8rem center; background-size: 16px;
+}
+select:not([multiple]):disabled {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%235b6878' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  cursor: not-allowed;
+}
+input:disabled, select:disabled { background: var(--surface-2); color: var(--muted); cursor: not-allowed; border-style: dashed; }
+input[type=checkbox], input[type=radio] { width: 1.05rem; height: 1.05rem; accent-color: var(--brand); margin: 0; }
+.helptext, .helptext ul { display: block; color: var(--muted); font-size: .85rem; margin-top: .25rem; }
+.helptext ul { padding-left: 1.2rem; }
+.errorlist { color: var(--danger); list-style: none; padding: 0; margin: .25rem 0; font-size: .9rem; font-weight: 500; }
+/* Radio choices (e.g. what a corrected loan follows): one per line, normal weight. */
+form > p > div > div > label, .card div[id] > div > label { display: flex; gap: .5rem; align-items: center; font-weight: 400; }
+
+/* ---------- Buttons ---------- */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .4rem; min-height: 2.6rem;
+  background: var(--brand); color: #fff; border: 1px solid var(--brand); border-radius: var(--radius-sm);
+  padding: .55rem 1.25rem; font: inherit; font-weight: 600; line-height: 1.2; cursor: pointer; text-decoration: none;
+  transition: background var(--ease), border-color var(--ease), box-shadow var(--ease), transform var(--ease);
+}
+.btn:hover { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; text-decoration: none; box-shadow: var(--shadow); }
+.btn:active { transform: translateY(1px); }
+.btn-secondary { background: var(--surface); color: var(--brand); border-color: var(--field-border); }
+.btn-secondary:hover { background: var(--surface-hover); color: var(--brand-hover); border-color: var(--brand); }
+/* Destroys or undoes something (Delete, Cancel transaction): red, so it never looks like the usual next step. */
+.btn-danger { background: var(--danger); border-color: var(--danger); }
+.btn-danger:hover { background: var(--danger-hover); border-color: var(--danger-hover); }
+.btn-social { width: 100%; background: var(--surface); color: var(--text); border-color: var(--field-border); margin-bottom: .5rem; }
+.btn-social:hover { background: var(--surface-2); color: var(--text); }
+/* The buttons that end a form: the main one first, Back (always a secondary button) after it. */
+.actions { display: flex; gap: .6rem; margin-top: 1.5rem; flex-wrap: wrap; align-items: center; }
+form[data-sending] button { cursor: progress; opacity: .7; }
+
+/* Links that act on a row: quiet until hovered; the destructive ones red. */
+.row-actions { white-space: nowrap; }
+.row-actions a { display: inline-block; padding: .15rem .45rem; border-radius: 6px; font-weight: 500; text-decoration: none; }
+.row-actions a:hover { background: var(--brand-soft); }
+.row-actions a.danger { color: var(--danger); }
+.row-actions a.danger:hover { background: var(--danger-soft); color: var(--danger-hover); }
+
+/* ---------- Messages ---------- */
+/* Success green, information blue, warnings amber, errors red – with a coloured edge as well as a background. */
+.msg { background: var(--success-soft); border-radius: var(--radius-sm); border-left: 5px solid var(--accent);
+       padding: .75rem 1rem; margin: 0 0 1.25rem; }
+.msg-info { background: var(--info-soft); border-color: var(--info); }
+.msg-warning { background: var(--warning-soft); border-color: var(--warning-edge); }
+.msg-error { background: var(--danger-soft); border-color: var(--danger); }
+.card .msg { margin: .75rem 0; }
+
+/* ---------- Tables ---------- */
+/* Each table sits in a rounded box that scrolls sideways when it's wider than the screen. */
+.table-wrap { overflow-x: auto; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+              box-shadow: var(--shadow); }
+table { width: 100%; border-collapse: collapse; font-size: .95rem; }
+th, td { text-align: left; padding: .6rem .75rem; border-bottom: 1px solid var(--border); white-space: nowrap; }
+thead th { background: var(--surface-2); font-size: .8rem; font-weight: 600; text-transform: uppercase;
+           letter-spacing: .03em; color: var(--muted); }
+tbody tr { transition: background var(--ease); }
+tbody tr:hover > td, tbody tr:hover > th { background: var(--surface-hover); }
+tbody tr:last-child > td, tbody tr:last-child > th { border-bottom: 0; }
+tfoot td, tfoot th { font-weight: 700; border-top: 2px solid var(--border); border-bottom: 0; background: var(--surface-2); }
+/* A row's name is its header (read out with each value in the row), but looks like any other cell. */
+tbody th[scope="row"] { background: var(--surface); font-weight: 500; color: var(--text); }
+td.desc { white-space: normal; min-width: 10rem; }
+.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.zero { color: var(--muted); }
+/* A table too wide for the screen says so, above it. */
+.table-wrap.scrolls::before { content: "Scroll sideways for more columns →"; display: block; position: sticky; left: 0;
+                              font-size: .85rem; color: var(--muted); padding: .5rem .9rem 0; }
+/* The row a link or a save brought you to. */
+tr[id] { scroll-margin-top: 5rem; }
+tr:target > td, tr:target > th { background: var(--highlight); }
+.empty { text-align: center; color: var(--muted); padding: 2rem 1rem; }
+
+/* Pills: a status or a label next to a description. */
+.tag { display: inline-flex; align-items: center; border: 0; border-radius: 999px; padding: .1rem .6rem;
+       font: inherit; font-size: .78rem; font-weight: 600; background: var(--surface-2); color: var(--brand); white-space: nowrap;
+       box-shadow: inset 0 0 0 1px var(--border); }
+button.tag { cursor: pointer; transition: filter var(--ease); }
+button.tag:hover { filter: brightness(.95); }
+.tag-cancelled { background: var(--danger-soft); color: var(--danger); box-shadow: inset 0 0 0 1px #fecaca; }
+
+/* ---------- Shared bits ---------- */
+/* What changed since the page was opened: in words as well as colour. */
+.changed { background: var(--warning-soft); }
+.changed-note { font-weight: 600; color: var(--warning); }
+/* A quiet panel inside a card (a leftover, a total, a note). */
+.panel { background: var(--surface-2); border-radius: var(--radius-sm); padding: .75rem 1rem; }
+/* A link to the purchase something came from: the colour of the text around it, underlined. */
+a.src, .paid-for a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); }
+a.src:hover, .paid-for a:hover { color: var(--brand); text-decoration-color: currentColor; }
+.home-cta { margin-top: 1.25rem; }
+
+/* ---------- Add form: splitting between people ---------- */
+.split { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem 1rem .25rem; margin: 1rem 0 1.25rem;
+         background: var(--surface-hover); }
+.split legend { padding: 0 .35rem; }
+.split .split-toggle { display: flex; align-items: center; gap: .5rem; margin: 0; cursor: pointer; }
+.split-body > p:first-child { margin-top: .25rem; }
+.field-participants { border: 0; margin: .75rem 0; padding: 0; min-width: 0; }
+/* The legend on the left, “Tick everyone” on the right of the same line. */
+.field-participants legend { float: left; font-weight: 600; padding: 0; margin-bottom: .3rem; }
+.field-participants .tick-all { float: right; }
+.field-participants > .errorlist, .field-participants > div { clear: both; }
+.field-participants > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .3rem .8rem; margin: .3rem 0 .6rem; }
+.field-participants > div label { display: flex; align-items: center; gap: .5rem; font-weight: 400; margin: 0; cursor: pointer; }
+.tick-all { background: none; border: 0; padding: 0; font: inherit; font-size: .9rem; color: var(--brand); text-decoration: underline; cursor: pointer; }
+.tick-all:hover { color: var(--brand-hover); text-decoration-thickness: 2px; }
+/* The “?” next to “Amount to split”: the explanation shows on hover, on keyboard focus and on tap, and Escape
+   closes it. It opens from the start of its row, not from the “?”, so it's never wider than the form. */
+.label-row { position: relative; display: flex; align-items: baseline; gap: .4rem; }
+.label-row label { margin-bottom: .3rem; }
+.hint { display: inline-flex; align-items: center; justify-content: center; width: 1.2rem; height: 1.2rem;
+        border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-size: .8rem; font-weight: 700; cursor: help; }
+.hint-text { display: none; position: absolute; left: 0; top: 100%; z-index: 10; width: 100%; max-width: 320px;
+             background: var(--brand); color: #fff; font-weight: 400; font-size: .85rem; line-height: 1.45;
+             padding: .7rem .85rem; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); }
+.hint:hover .hint-text, .hint:focus .hint-text { display: block; }
+.hint.closed .hint-text { display: none; }
+/* Bridges the gap between the “?” and the explanation, so moving the mouse onto it doesn't close it. */
+.hint-text::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: .8rem; }
+
+/* ---------- Date box with its calendar button ---------- */
+.date-row { display: flex; gap: .4rem; align-items: stretch; }
+.date-row input { flex: 1; min-width: 0; }
+.date-pick { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 2.6rem;
+             background: var(--surface); color: var(--brand); border: 1px solid var(--field-border);
+             border-radius: var(--radius-sm); cursor: pointer; transition: background var(--ease), border-color var(--ease); }
+.date-pick:hover { background: var(--surface-hover); border-color: var(--brand); }
+.date-pick:focus-visible, .flatpickr-prev-month:focus-visible, .flatpickr-next-month:focus-visible {
+  outline: 3px solid var(--focus); outline-offset: 2px; }
+
+/* ---------- Transactions ---------- */
+.filters { display: flex; flex-wrap: wrap; gap: .75rem 1rem; align-items: end; margin-bottom: 1rem; padding: 1rem 1.25rem; }
+.filters .field { margin: 0; min-width: 150px; flex: 1 1 150px; max-width: 220px; }
+.filters .toggle { display: flex; align-items: center; gap: .5rem; font-weight: 400; margin: 0; min-height: 2.6rem; cursor: pointer; }
+.filters .clear { align-self: center; }
+.filter-note { margin: -.25rem 0 1rem; color: var(--muted); }
+#done { scroll-margin-top: 5rem; }
+.paid-for { color: var(--muted); font-size: .85rem; margin-top: .15rem; }
+tr.has-history { cursor: pointer; }
+tr.cancelled td.val { text-decoration: line-through; color: var(--muted); }
+tr.history > td { background: var(--surface-hover); white-space: normal; }
+.history ol { list-style: none; margin: 0; padding: 0; }
+.history li { padding: .5rem 0; border-bottom: 1px dashed var(--border); }
+.history li:last-child { border-bottom: 0; }
+.history .who { color: var(--muted); font-size: .85rem; }
+
+/* ---------- Debts ---------- */
+.balances { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 1rem; }
+.balances .card { padding: 1.1rem 1.25rem; }
+.balances h3 { margin: 0 0 .5rem; font-size: 1rem; }
+.balances table { font-size: .95rem; }
+.balances th, .balances td { padding: .5rem .25rem; }
+.balances tfoot td, .balances tfoot th { background: none; }
+.balances tbody tr:hover > td, .balances tbody tr:hover > th { background: none; }
+
+/* ---------- Confirm payment / split ---------- */
+.debts { border: 0; margin: 0; padding: 0; min-width: 0; }
+.debts legend { padding: 0; margin: 1rem 0 0; }
+.covers, .shares { list-style: none; padding: 0; margin: .75rem 0 1rem; }
+.covers li, .shares li { border-bottom: 1px solid var(--border); }
+.covers li:last-child, .shares li:last-child { border-bottom: 0; }
+.covers label { display: flex; align-items: baseline; gap: .75rem; font-weight: 400; margin: 0; padding: .6rem .25rem;
+                cursor: pointer; border-radius: var(--radius-sm); transition: background var(--ease); }
+.covers label:hover { background: var(--surface-hover); }
+.covers .what { flex: 1; }
+.covers .origin { display: block; font-size: .85rem; color: var(--muted); }
+.covers .status { display: block; min-height: 1.3em; font-size: .85rem; color: var(--muted); }
+.covers .status.paid { color: var(--income); font-weight: 600; }
+.covers .status.partly, .covers .status.ran_out { color: var(--warning); font-weight: 600; }
+.covers .changed-note { display: block; font-size: .85rem; }
+.covers[aria-busy="true"] { opacity: .6; cursor: progress; }
+.updating { min-height: 1.3em; margin: .5rem 0 0; color: var(--muted); }
+.leftover { min-height: 2.6em; }
+.leftover .muted { display: block; }
+.shares li { display: flex; gap: .75rem; align-items: baseline; padding: .55rem .25rem; }
+.shares .who { flex: 1; }
+.shares .own { color: var(--muted); }
+
+/* ---------- Correct / cancel ---------- */
+.blocked { background: var(--danger-soft); border-left: 5px solid var(--expense); border-radius: var(--radius-sm); padding: .25rem 1rem; }
+.effect-head { font-weight: 600; margin-bottom: .2rem; }
+.effects ul, .blocked ul { margin-top: .2rem; padding-left: 1.2rem; }
+
+/* ---------- Summary ---------- */
+.page-summary .intro { margin-bottom: 1.5rem; }
+/* Each period has its own soft colour, so it's clear which year a table belongs to. */
+.period { border-radius: var(--radius); border-left: 6px solid; padding: .5rem 1.5rem 1.5rem; margin: 1.5rem 0; }
+.period h2 { margin: 1rem 0 .5rem; font-size: 1.25rem; }
+.period h3 { margin: 1.25rem 0 .5rem; }
+.all-time { background: #eef2ff; border-color: #6366f1; }
+.this-year { background: var(--accent-soft); border-color: var(--accent); }
+.last-year { background: var(--warning-soft); border-color: var(--warning-edge); }
+.month-by-month { background: var(--surface-2); border-color: #94a3b8; }
+.totals { margin: .75rem 0 0; }
+/* Long column names ("Received from members") take two lines, so the all-time table fits on a laptop. */
+.page-summary thead th { white-space: normal; vertical-align: bottom; }
+/* The names stay in view while the rest of a wide table scrolls sideways (on a phone). */
+.page-summary tr > :first-child { position: sticky; left: 0; z-index: 1; }
+.page-summary tbody tr > :first-child { background: var(--surface); }
+
+/* ---------- Print (the summary especially): just the figures, on white, nothing cut off ---------- */
+@media print {
+  @page { margin: 1.5cm; }
+  body { background: #fff; color: #000; font-size: 11pt; }
+  .site-header, .messages, .forms, .filters, .filter-note, .actions, .row-actions, .btn, form button,
+  .table-wrap.scrolls::before, script { display: none !important; }
+  main, body.wide main { max-width: none; margin: 0; padding: 0; }
+  .card, .table-wrap { box-shadow: none; border-color: #bbb; }
+  .table-wrap { overflow: visible; }
+  table { font-size: 9.5pt; }
+  th, td { padding: .3rem .45rem; white-space: normal; }
+  thead { display: table-header-group; }   /* column names again on every page */
+  tr { break-inside: avoid; }
+  .page-summary tr > :first-child { position: static; }
+  .period { background: none !important; border: 1px solid #bbb; border-left-width: 6px; break-inside: avoid-page;
+            padding: .25rem .75rem .75rem; margin: .75rem 0; }
+  .period:first-of-type { break-before: auto; }
+  a { color: inherit; text-decoration: none; }
+  .zero, .muted { color: #444; }
+}

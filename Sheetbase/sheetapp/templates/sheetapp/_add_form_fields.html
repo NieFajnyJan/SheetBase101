@@ -34,36 +34,6 @@ hiding the wrapper (as splitting does with “owes”) would leave the box itsel
       {% endif %}
     </div>
   </fieldset>
-  <style>
-    .split { border: 1px solid #e3e3e3; border-radius: 6px; padding: .4rem .9rem .2rem; margin: 1rem 0; }
-    .split legend { padding: 0 .3rem; }
-    .split .split-toggle { display: flex; align-items: center; gap: .4rem; margin: 0; cursor: pointer; }
-    .field { margin: .8rem 0; }
-    .field-participants { border: 0; margin: .8rem 0; padding: 0; min-width: 0; }
-    /* The legend on the left, “Tick everyone” on the right of the same line. */
-    .field-participants legend { float: left; font-weight: 600; padding: 0; margin-bottom: .25rem; }
-    .field-participants .tick-all { float: right; }
-    .field-participants > .errorlist, .field-participants > div { clear: both; }
-    /* The “?” next to “Amount to split”: the explanation shows on hover, on keyboard focus and on tap,
-       and Escape closes it. */
-    /* The explanation opens from the start of this row, not from the “?”, so it's never wider than the
-       form and can't run off a phone's screen. */
-    .label-row { position: relative; display: flex; align-items: baseline; gap: .4rem; }
-    .label-row label { margin-bottom: .25rem; }
-    .hint { display: inline-flex; align-items: center; justify-content: center; width: 1.15rem; height: 1.15rem;
-            border-radius: 50%; background: #e8ecf5; color: #2b3a55; font-size: .8rem; font-weight: 700; cursor: help; }
-    .hint-text { display: none; position: absolute; left: 0; top: 100%; z-index: 10; width: 100%; max-width: 320px;
-                 box-sizing: border-box;
-                 background: #2b3a55; color: #fff; font-weight: 400; font-size: .85rem; line-height: 1.4;
-                 padding: .6rem .75rem; border-radius: 6px; box-shadow: 0 2px 8px #0003; }
-    .hint:hover .hint-text, .hint:focus .hint-text { display: block; }
-    .hint.closed .hint-text { display: none; }
-    /* Bridges the gap between the “?” and the explanation, so moving the mouse onto it doesn't close it. */
-    .hint-text::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: .8rem; }
-    .tick-all { background: none; border: 0; padding: 0; font: inherit; font-size: .9rem; color: #2b3a55; text-decoration: underline; cursor: pointer; }
-    .field-participants > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: .2rem .8rem; margin: .3rem 0 .6rem; }
-    .field-participants > div label { display: flex; align-items: center; gap: .4rem; font-weight: 400; margin: 0; cursor: pointer; }
-  </style>
   <script>
     // The members list shows only when “Split between people” is ticked; on the Planned form it replaces “owes”.
     (() => {

@@ -1,14 +1,6 @@
 {# A calendar button next to each “date paid” box (class=datepicker). #}
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.css">
 <script src="https://cdn.jsdelivr.net/npm/flatpickr@4.6.13/dist/flatpickr.min.js" defer></script>
-<style>
-  .date-row { display: flex; gap: .4rem; align-items: stretch; }
-  .date-row input { flex: 1; min-width: 0; }
-  .date-pick { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 2.5rem;
-               background: #fff; color: #2b3a55; border: 1px solid #2b3a55; border-radius: 4px; cursor: pointer; }
-  .date-pick:focus-visible, .flatpickr-prev-month:focus-visible, .flatpickr-next-month:focus-visible {
-    outline: 3px solid #2b3a55; outline-offset: 2px; }
-</style>
 <script>
   // The box itself stays an ordinary text box: what's typed in it is sent as it is, and the server checks it
   // (and says what's wrong). The calendar sits on a button beside it and only fills the box in when a day

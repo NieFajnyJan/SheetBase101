@@ -1,57 +1,11 @@
 {% extends "base.html" %}
 {% load money %}
 
+{% block body_class %}wide page-transactions{% endblock %}
 {% block title %}Transactions · SheetBase{% endblock %}
 
 {% block extra_head %}
 {% include "sheetapp/_datepicker.html" %}
-<style>
-  main { max-width: 1100px; }
-  .card h2 { margin-top: 0; font-size: 1.15rem; }
-  .card p, .card .field { margin: .5rem 0; }
-  /* Add form centred; the shop box sits beside it, collapsed until clicked. */
-  .forms { display: grid; grid-template-columns: 1fr minmax(0, 480px) 1fr; gap: 1rem; align-items: start; }
-  .forms > .form-card { grid-column: 2; }
-  .forms > .side { grid-column: 3; max-width: 260px; }
-  .side summary { cursor: pointer; font-weight: 600; }
-  .side form { margin-top: .8rem; }
-  @media (max-width: 900px) {
-    .forms { grid-template-columns: minmax(0, 480px); justify-content: center; }
-    .forms > .form-card, .forms > .side { grid-column: 1; max-width: none; }
-  }
-  h2.section { margin: 2rem 0 .5rem; }
-  #done { scroll-margin-top: 1rem; }
-  .filters { display: flex; flex-wrap: wrap; gap: .8rem; align-items: end; margin-bottom: 1rem; }
-  .card.filters p { margin: 0; min-width: 150px; }
-  .filter-note { margin: -.4rem 0 1rem; }
-  .filters .toggle { display: flex; align-items: center; gap: .4rem; font-weight: 400; margin: 0; padding-bottom: .55rem; cursor: pointer; }
-  .table-wrap { overflow-x: auto; }
-  table { width: 100%; border-collapse: collapse; background: #fff; font-size: .95rem; }
-  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid #eee; white-space: nowrap; }
-  td.desc { white-space: normal; }
-  th { background: #f3f4f7; }
-  .num { text-align: right; font-variant-numeric: tabular-nums; }
-  tfoot td { font-weight: 700; border-top: 2px solid #ccc; }
-  /* Corrections */
-  .tag { border: 0; border-radius: 10px; padding: .05rem .5rem; font: inherit; font-size: .8rem; background: #e8ecf5; color: #2b3a55; }
-  button.tag { cursor: pointer; }
-  .tag-cancelled { background: #fde8ea; color: #b00020; }
-  tr.has-history { cursor: pointer; }
-  tr.cancelled td.val { text-decoration: line-through; color: var(--muted); }
-  td.actions a { margin-right: .6rem; }
-  /* What a payment paid; a debt from a purchase links to it, and the linked row lights up. */
-  .paid-for { color: var(--muted); font-size: .85rem; }
-  /* Links to a purchase: the grey of the line around them, underlined, darker on hover. */
-  .paid-for a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 2px; }
-  .paid-for a:hover { color: #2b3a55; text-decoration-color: currentColor; }
-  tr:target > td { background: #fff4cc; }
-  tr[id] { scroll-margin-top: 4rem; }
-  tr.history > td { background: #f8f9fc; white-space: normal; }
-  .history ol { list-style: none; margin: 0; padding: 0; }
-  .history li { padding: .4rem 0; border-bottom: 1px dashed #dde; }
-  .history li:last-child { border-bottom: 0; }
-  .history .who { color: var(--muted); font-size: .85rem; }
-</style>
 {% endblock %}
 
 {% block content %}
@@ -75,7 +29,7 @@
     </form>
 
     <div class="side">
-      <a class="card switch" href="{% url 'planned' %}">Debts →</a>
+      <a class="card switch" href="{% url 'planned' %}">Debts <span aria-hidden="true">→</span></a>
       {# Collapsed by default; stays open when the shop form has an error. #}
       <details class="card"{% if shop_form.errors %} open{% endif %}>
         <summary>+ Add shop</summary>
@@ -92,17 +46,17 @@
     </div>
   </div>
 
-  <h2 class="section" id="done">Done transactions</h2>
+  <h2 class="section-title" id="done">Done transactions</h2>
 
   {# Filtering comes back to this list, not to the top of the page. #}
   <form class="card filters" method="get" action="{% url 'transactions' %}#done">
     {% for field in filter_form %}{% if field.name != "hide_cancelled" %}
-      <p>{{ field.label_tag }} {{ field }}{{ field.errors }}</p>
+      <div class="field">{{ field.label_tag }} {{ field }}{{ field.errors }}</div>
     {% endif %}{% endfor %}
     {# Applied with the rest by Filter – ticking it alone doesn't reload the page under you. #}
     <label class="toggle">{{ filter_form.hide_cancelled }} Hide cancelled</label>
     <button class="btn">Filter</button>
-    {% if filtered %}<a href="{% url 'transactions' %}#done">Clear</a>{% endif %}
+    {% if filtered %}<a class="clear" href="{% url 'transactions' %}#done">Clear</a>{% endif %}
   </form>
   {% if not filters_valid %}
     <p class="card filter-note"><strong>Nothing shown:</strong> a filter above can't be used – fix it or click Clear.</p>
@@ -138,7 +92,7 @@
                 {% endif %}
               </td>
               <td>{{ t.created_by }}</td><td>{{ t.created_at|day }}</td>
-              <td class="actions">{% if t|correctable_by:user %}{% with back=history_query|urlencode %}<a href="{% url 'correct_transaction' t.pk %}{% if back %}?back={{ back }}{% endif %}">Correct</a><a href="{% url 'cancel_transaction' t.pk %}{% if back %}?back={{ back }}{% endif %}">Cancel</a>{% endwith %}{% endif %}</td>
+              <td class="row-actions">{% if t|correctable_by:user %}{% with back=history_query|urlencode %}<a href="{% url 'correct_transaction' t.pk %}{% if back %}?back={{ back }}{% endif %}">Correct</a><a class="danger" href="{% url 'cancel_transaction' t.pk %}{% if back %}?back={{ back }}{% endif %}">Cancel</a>{% endwith %}{% endif %}</td>
             </tr>
             {% if t.is_corrected %}
               <tr class="history" id="history-{{ t.pk }}">
@@ -168,9 +122,9 @@
     </div>
   {% elif not filters_valid %}
   {% elif filtered %}
-    <p class="card muted">No transactions match these filters.</p>
+    <p class="card empty">No transactions match these filters.</p>
   {% else %}
-    <p class="card muted">No transactions yet – add the first one above.</p>
+    <p class="card empty">No transactions yet – add the first one above.</p>
   {% endif %}
   <script>
     // Histories start hidden; clicking a corrected transaction (or its tag) shows / hides its history under it,
