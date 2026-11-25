@@ -11,7 +11,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, connection, models, transaction as db_transaction
 from django.db.migrations.executor import MigrationExecutor
 from django.db.models import ProtectedError
-from django.test import TestCase, override_settings
+from django.test import Client, override_settings
+from django.test import TestCase as DjangoTestCase
 from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
@@ -33,6 +34,28 @@ from .payments import plan_payment, record_payment
 from .splits import divide, plan_split
 from .summary import complete_months
 from .templatetags.money import zl
+
+
+class BrowserClient(Client):
+    """Follows the redirect to the payment confirmation (?preview=1) as a browser does, so a test sees
+    the screen it would."""
+
+    def post(self, *args, **kwargs):
+        response = super().post(*args, **kwargs)
+        if response.status_code == 302 and "preview=1" in response.url and not kwargs.get("follow"):
+            return self.get(response.url)
+        return response
+
+
+class TestCase(DjangoTestCase):
+    client_class = BrowserClient
+
+    def assertBackInHistory(self, response, url):
+        """After Correct or Cancel: back to `url` (the history), on the transaction's row (#t-<pk>)."""
+        self.assertEqual(response.status_code, 302)
+        page, _, row = response.url.partition("#")
+        self.assertEqual(page, url)
+        self.assertRegex(row, r"^t-\d+$")
 
 
 PASSWORD = "Sup3r-secret-pw!"
@@ -76,6 +99,7 @@ GOOGLE_CONFIGURED = {
     }
 }
 GOOGLE_NOT_CONFIGURED = {"google": {"APPS": []}}
+
 
 
 def google_profile(**overrides):
@@ -310,6 +334,85 @@ class HeadingsAndTablesTests(TestCase):
         PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
                                           description="Kawa", created_by=self.jan)
         self.assertContains(self.client.get(reverse("planned")), '<th><span class="visually-hidden">Actions</span></th>')
+
+
+class KeepYourPlaceTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.shop = User.objects.get(username=SHOP_USERNAME)
+        self.url = reverse("transactions")
+        self.client.force_login(self.jan)
+
+    def test_adding_a_shop_keeps_the_purchase_being_typed(self):
+        draft = {"amount": "12,49", "payer": self.jan.pk, "recipient": "", "description": "Kawa",
+                 "date": "20.11.2026", "submission": str(uuid.uuid4())}
+        response = self.client.post(f"{self.url}?year=2026", {**draft, "add_shop": "", "name": "Biedronka"})
+        self.assertRedirects(response, f"{self.url}?year=2026#top", fetch_redirect_response=False)
+        shop = User.objects.get(first_name="Biedronka")
+        form = self.client.get(response.url).context["form"]
+        self.assertEqual((form["amount"].value(), form["description"].value(), form["date"].value()),
+                         ("12,49", "Kawa", "20.11.2026"))
+        self.assertEqual(int(form["recipient"].value()), shop.pk)  # what it was added for
+        self.assertFalse(Transaction.objects.exists())
+        self.assertIsNone(self.client.get(self.url).context["form"]["amount"].value())  # only once
+
+    def test_a_shop_can_be_added_with_the_purchase_still_empty(self):
+        html = self.client.get(self.url).content.decode()
+        self.assertIn('<button class="btn" name="add_shop" form="add-form" formnovalidate>', html)
+
+    def test_payment_confirmation_survives_a_reload(self):
+        debt = PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
+                                                 description="Kawa", created_by=self.jan)
+        client = Client()
+        client.force_login(self.jan)
+        data = {"amount": "5", "payer": self.jan.pk, "recipient": self.ola.pk, "description": "Zwrot",
+                "date": today().strftime("%d.%m.%Y"), "submission": str(uuid.uuid4())}
+        response = client.post(self.url, data)
+        self.assertRedirects(response, f"{self.url}?preview=1", fetch_redirect_response=False)
+        for _ in range(2):  # shown, then reloaded: the same screen, nothing sent again
+            screen = client.get(response.url)
+            self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
+        self.assertFalse(Transaction.objects.exists())
+        done = client.post(response.url, {**data, "choosing": "1", "debts": [debt.pk], "confirm": "",
+                                          "plan": screen.context["plan"].signature()})
+        self.assertRedirects(done, self.url, fetch_redirect_response=False)
+        self.assertEqual(Transaction.objects.count(), 1)
+        # The old address shows the page, not the screen again.
+        self.assertTemplateUsed(client.get(response.url), "sheetapp/transactions.html")
+
+    def test_ticking_a_debt_says_it_is_updating(self):
+        PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
+                                          description="Kawa", created_by=self.jan)
+        screen = self.client.post(self.url, {"amount": "5", "payer": self.jan.pk, "recipient": self.ola.pk,
+                                             "description": "Zwrot", "date": today().strftime("%d.%m.%Y")})
+        self.assertContains(screen, '<p class="updating" id="updating" role="status"></p>')
+        self.assertContains(screen, '"Updating…"')
+
+    def test_correct_and_cancel_come_back_to_the_filtered_history_on_that_row(self):
+        t = Transaction.objects.create(amount=Decimal("10.00"), payer=self.jan, recipient=self.shop,
+                                       created_by=self.jan, description="Kawa")
+        history = self.client.get(self.url, {"payer": self.jan.pk, "year": today().year})
+        back = f"payer%3D{self.jan.pk}%26year%3D{today().year}"
+        self.assertContains(history, f'{reverse("correct_transaction", args=[t.pk])}?back={back}"')
+        self.assertContains(history, f'{reverse("cancel_transaction", args=[t.pk])}?back={back}"')
+        target = f"{self.url}?payer={self.jan.pk}&year={today().year}#t-{t.pk}"
+        url = f'{reverse("correct_transaction", args=[t.pk])}?back={back}'
+        self.assertContains(self.client.get(url), f'<a href="{target.replace("&", "&amp;")}">Back</a>')
+        response = self.client.post(url, {"amount": "11.00", "payer": self.jan.pk, "recipient": self.shop.pk,
+                                          "description": "Kawa", "date": today().strftime("%d.%m.%Y"),
+                                          "reason": "typo"})
+        self.assertEqual(response.url, target)
+
+    def test_amount_of_a_split_purchase_is_greyed_out(self):
+        purchase = Transaction.objects.create(amount=Decimal("10.00"), payer=self.jan, recipient=self.shop,
+                                              created_by=self.jan, description="Pizza")
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                          description="Pizza", source=purchase, created_by=self.jan)
+        form = self.client.get(reverse("correct_transaction", args=[purchase.pk])).context["form"]
+        self.assertTrue(form.fields["amount"].disabled)
+        self.assertIn("this purchase was split between people", form.fields["amount"].help_text)
+        self.assertFalse(form.fields["description"].disabled)
 
 
 class TransactionModelTests(TestCase):
@@ -734,9 +837,9 @@ class BetweenShopsTests(TestCase):
                "date": today().strftime("%d/%m/%y"), "reason": "it was me who paid"}
         self.assertContains(self.client.post(url, {**fix, "payer": self.shop.pk, "description": "Inny"}),
                             "One side has to be a member")  # still between shops: not even a description fix
-        self.assertRedirects(self.client.post(url, {**fix, "payer": self.jan.pk}), reverse("transactions"))
+        self.assertBackInHistory(self.client.post(url, {**fix, "payer": self.jan.pk}), reverse("transactions"))
         other = self.old_one()
-        self.assertRedirects(self.client.post(reverse("cancel_transaction", args=[other.pk]), {"reason": "mistake"}),
+        self.assertBackInHistory(self.client.post(reverse("cancel_transaction", args=[other.pk]), {"reason": "mistake"}),
                              reverse("transactions"))
         self.assertTrue(Transaction.objects.get(pk=other.pk).is_cancelled)
 
@@ -825,7 +928,7 @@ class CorrectionTests(TestCase):
             self.assertRedirects(self.client.get(url), f"{reverse('login')}?next={url}", fetch_redirect_response=False)
 
     def test_correction_changes_row_and_total_but_not_original(self):
-        self.assertRedirects(self.correct(amount="12,49"), self.list_url)
+        self.assertBackInHistory(self.correct(amount="12,49"), self.list_url)
         self.assertEqual(self.total(), Decimal("12.49"))
         self.assertEqual(self.row().current.amount, Decimal("12.49"))
         self.assertEqual(Transaction.objects.get().amount, Decimal("124.90"))  # original untouched
@@ -922,7 +1025,7 @@ class CorrectionTests(TestCase):
 
     def test_correction_from_an_old_page_keeps_the_newer_values(self):
         old = self.shown(self.correct_url)  # a second tab, opened at 124,90 zł
-        self.assertRedirects(self.correct(amount="12,49", shown=self.shown(self.correct_url)), self.list_url)
+        self.assertBackInHistory(self.correct(amount="12,49", shown=self.shown(self.correct_url)), self.list_url)
         # The old tab only fixes the description, but still holds the old amount.
         page = self.correct(description="Kawa i ciastko", shown=old)
         self.assertContains(page, "Nothing was saved. It changed after you opened this page: amount (now 12,49\xa0zł)")
@@ -932,7 +1035,7 @@ class CorrectionTests(TestCase):
         self.assertEqual(form["description"].value(), "Kawa i ciastko")  # what was typed is kept
         # Sent again as it's now shown, it saves – without undoing the first correction.
         again = {f: form[f].value() for f in ("amount", "payer", "recipient", "description", "reason", "shown")}
-        self.assertRedirects(self.client.post(self.correct_url, {**again, "date": today().strftime("%d/%m/%y")}),
+        self.assertBackInHistory(self.client.post(self.correct_url, {**again, "date": today().strftime("%d/%m/%y")}),
                              self.list_url)
         current = self.row().current
         self.assertEqual((current.amount, current.description), (Decimal("12.49"), "Kawa i ciastko"))
@@ -951,7 +1054,7 @@ class CorrectionTests(TestCase):
         page = self.client.post(self.cancel_url, {"reason": "never happened", "shown": old})
         self.assertContains(page, "Nothing was saved. It changed after you opened this page: amount (now 12,49\xa0zł)")
         self.assertFalse(self.row().is_cancelled)
-        self.assertRedirects(self.client.post(self.cancel_url, {"reason": "never happened",
+        self.assertBackInHistory(self.client.post(self.cancel_url, {"reason": "never happened",
                                                                 "shown": page.context["form"]["shown"].value()}),
                              self.list_url)
         self.assertTrue(self.row().is_cancelled)
@@ -960,7 +1063,7 @@ class CorrectionTests(TestCase):
         self.assertEqual(self.client.post(self.cancel_url, {"reason": ""}).status_code, 200)  # reason required
         self.assertFalse(TransactionCorrection.objects.exists())
 
-        self.assertRedirects(self.client.post(self.cancel_url, {"reason": "never happened"}), self.list_url)
+        self.assertBackInHistory(self.client.post(self.cancel_url, {"reason": "never happened"}), self.list_url)
         self.assertEqual(self.total(), 0)
         t = self.row()
         self.assertTrue(t.is_cancelled)
@@ -1050,7 +1153,7 @@ class OldDateCorrectionTests(TestCase):
             "date": f"{when:%d.%m.%Y}", "reason": "typo"})
 
     def test_its_date_can_stay(self):
-        self.assertRedirects(self.correct(self.old), reverse("transactions"))
+        self.assertBackInHistory(self.correct(self.old), reverse("transactions"))
         self.assertEqual(Transaction.objects.get().current.amount, Decimal("12.00"))
 
     def test_another_old_date_is_refused(self):
@@ -1657,7 +1760,7 @@ class PayingDebtsTests(TestCase):
     def test_cancel_reopens_debts_and_removes_leftover(self):
         a, b = self.debt("30.00"), self.debt("50.00")
         pay = self.pay("100.00")
-        self.assertRedirects(self.cancel(pay), self.url)
+        self.assertBackInHistory(self.cancel(pay), self.url)
         self.assertEqual(set(PlannedTransaction.objects.open()), {a, b})
         self.assertFalse(PlannedTransaction.objects.settled().exists())
         self.assertFalse(pay.leftovers.exists())
@@ -1676,20 +1779,25 @@ class PayingDebtsTests(TestCase):
         pay = self.pay("90.00")
         url = reverse("correct_transaction", args=[pay.pk])
         fix = {**self.data("90.00"), "reason": "typo"}
+        # Shown greyed out with the reason, and what's sent for them anyway is ignored.
+        page = self.client.get(url)
+        for name in ("amount", "payer", "recipient"):
+            self.assertTrue(page.context["form"].fields[name].disabled)
+        self.assertContains(page, "Can't be changed: this payment paid debts. To change it, cancel it and add it again.")
         for change in ({"amount": "80.00"}, {"recipient": self.ewa.pk}, {"payer": self.ewa.pk}):
-            self.assertContains(self.client.post(url, {**fix, **change}), "Cancel it and add it again")
+            self.assertContains(self.client.post(url, {**fix, **change}), "Nothing was changed.")
         self.assertFalse(pay.corrections.exists())
-        self.assertRedirects(self.client.post(url, {**fix, "description": "Zwrot za fotel"}), self.url)
+        self.assertBackInHistory(self.client.post(url, {**fix, "description": "Zwrot za fotel"}), self.url)
 
     def test_loan_follows_a_correction(self):
         pay = self.pay("100.00")  # owed nothing: jan now owes ola 100
         url = reverse("correct_transaction", args=[pay.pk])
         fix = {**self.data("100.00"), "reason": "typo"}
-        self.assertRedirects(self.client.post(url, {**fix, "amount": "120.00", "description": "Pożyczka"}), self.url)
+        self.assertBackInHistory(self.client.post(url, {**fix, "amount": "120.00", "description": "Pożyczka"}), self.url)
         loan = self.leftover(pay)
         self.assertEqual((loan.debtor, loan.creditor, loan.amount, loan.description),
                          (self.jan, self.ola, Decimal("120.00"), "Pożyczka"))
-        self.assertRedirects(self.client.post(url, {**fix, "amount": "120.00", "description": "Pożyczka",
+        self.assertBackInHistory(self.client.post(url, {**fix, "amount": "120.00", "description": "Pożyczka",
                                                     "recipient": self.ewa.pk}), self.url)
         self.assertEqual(self.leftover(pay).debtor, self.ewa)
 
@@ -1701,7 +1809,7 @@ class PayingDebtsTests(TestCase):
         pay = self.pay("100.00")  # owed nothing: jan now owes ola 100
         self.edit_loan(pay, amount=Decimal("70.00"))
         url = reverse("correct_transaction", args=[pay.pk])
-        self.assertRedirects(self.client.post(url, {**self.data("100.00"), "description": "Pożyczka",
+        self.assertBackInHistory(self.client.post(url, {**self.data("100.00"), "description": "Pożyczka",
                                                     "reason": "typo"}), self.url)
         loan = self.leftover(pay)
         self.assertEqual((loan.amount, loan.description), (Decimal("70.00"), "Pożyczka"))
@@ -1716,11 +1824,11 @@ class PayingDebtsTests(TestCase):
         self.assertContains(page, "amount: the loan says 70,00\xa0zł, the correction 120,00\xa0zł")
         self.assertFalse(pay.corrections.exists())
 
-        self.assertRedirects(self.client.post(url, {**fix, "loan": "keep"}), self.url)
+        self.assertBackInHistory(self.client.post(url, {**fix, "loan": "keep"}), self.url)
         self.assertEqual(Transaction.objects.get(pk=pay.pk).current.amount, Decimal("120.00"))
         self.assertEqual(self.leftover(pay).amount, Decimal("70.00"))
 
-        self.assertRedirects(self.client.post(url, {**self.data("130.00"), "reason": "typo", "loan": "follow"}),
+        self.assertBackInHistory(self.client.post(url, {**self.data("130.00"), "reason": "typo", "loan": "follow"}),
                              self.url)
         self.assertEqual(self.leftover(pay).amount, Decimal("130.00"))
 
@@ -1738,7 +1846,7 @@ class PayingDebtsTests(TestCase):
         PlannedTransaction.objects.filter(pk=self.leftover(pay).pk).update(description="Na taksówkę")
         url = reverse("correct_transaction", args=[pay.pk])
         yesterday = (today() - timedelta(days=1)).strftime("%d/%m/%y")
-        self.assertRedirects(self.client.post(url, {**self.data("100.00"), "date": yesterday, "reason": "x"}), self.url)
+        self.assertBackInHistory(self.client.post(url, {**self.data("100.00"), "date": yesterday, "reason": "x"}), self.url)
         self.assertEqual(self.leftover(pay).description, "Na taksówkę")
 
     def test_loan_cant_be_corrected_once_paid_back_or_into_a_purchase(self):
@@ -1759,7 +1867,7 @@ class PayingDebtsTests(TestCase):
         self.client.force_login(self.ola)
         url = reverse("correct_transaction", args=[pay.pk])
         fix = {**self.data("50.00"), "description": "Pożyczka na obiad", "reason": "typo"}
-        self.assertRedirects(self.client.post(url, fix), self.url)
+        self.assertBackInHistory(self.client.post(url, fix), self.url)
         self.assertEqual(Transaction.objects.get(pk=pay.pk).current.description, "Pożyczka na obiad")
         loan = self.leftover(pay)  # paid back, so it's history and stays as it was
         self.assertTrue(loan.is_settled)

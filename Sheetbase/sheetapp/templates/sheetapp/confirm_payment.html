@@ -22,6 +22,8 @@
   .btn-secondary { background: #fff; color: #2b3a55; border: 1px solid #2b3a55; }
   /* What changed since Confirm was clicked: in words as well as colour. */
   .changed { background: #fff4e0; }
+  .updating { min-height: 1.3em; margin: .4rem 0 0; color: var(--muted); }
+  .covers[aria-busy="true"] { opacity: .6; cursor: progress; }
   .changed-note { display: block; font-size: .85rem; font-weight: 600; color: #7a4100; }
 </style>
 {% endblock %}
@@ -96,6 +98,7 @@
       {% endif %}
       {% if plan.debts %}<button class="btn btn-secondary" name="recalculate" id="recalculate">Update</button>{% endif %}
     </div>
+    <p class="updating" id="updating" role="status"></p>
   </form>
   <script>
     // Ticking or unticking a debt recalculates straight away (the Update button does the same without JavaScript).
@@ -116,6 +119,10 @@
           try {
             sessionStorage.setItem("confirm-payment", JSON.stringify({ y: window.scrollY, debt: box.value }));
           } catch (e) {}
+          // While it reloads: says so, and the boxes wait (a second tick would be lost).
+          document.getElementById("updating").textContent = "Updating…";
+          document.querySelectorAll('input[name="debts"]').forEach(b => { b.style.pointerEvents = "none"; });
+          document.querySelector(".covers").setAttribute("aria-busy", "true");
           box.form.requestSubmit(recalc);
         }));
     }

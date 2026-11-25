@@ -124,6 +124,13 @@ class CorrectionForm(UpToDateMixin, TransactionForm):
         self.instance.original = original
         self.instance.version = self.current.version + 1  # replaces the version checked here
         self.add_shown_field(self.current, CORRECTABLE_FIELDS)
+        # What can't change any more is shown greyed out, rather than refused after it was changed.
+        why = ("this purchase was split between people" if original.split_shares.exists()
+               else "this payment paid debts" if original.touches_debts() and not original.is_loan() else None)
+        if why:
+            for name in ("amount", "payer", "recipient"):
+                self.fields[name].disabled = True
+                self.fields[name].help_text = f"Can't be changed: {why}. To change it, cancel it and add it again."
         # A date older than the usual limit may stay as it is (see TransactionCorrection.clean_fields).
         attrs = self.fields["date"].widget.attrs
         attrs["data-min"] = min(attrs["data-min"], self.current.date.isoformat())
