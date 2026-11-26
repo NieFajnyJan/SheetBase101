@@ -84,6 +84,20 @@ class NoLocalAccountsTests(TestCase):
         self.client.force_login(User.objects.create_user("jan", "jan@example.com"))
         self.assertRedirects(self.client.get(reverse("login")), reverse("transactions"))
 
+    def test_your_name_shows_what_you_paid(self):
+        jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        shop = User.objects.get(username=SHOP_USERNAME)
+        for payer, what in ((jan, "Kawa"), (ola, "Herbata")):
+            Transaction.objects.create(amount=Decimal("1.00"), payer=payer, recipient=shop, created_by=payer, description=what)
+        self.client.force_login(jan)
+        url = f"{reverse('transactions')}?payer={jan.pk}"
+        self.assertContains(self.client.get(reverse("planned")), f'<a class="user" href="{url}#done" title="Jan – what you paid">Jan</a>')
+        page = self.client.get(url)
+        self.assertContains(page, "Kawa")
+        self.assertNotContains(page, "Herbata")
+        self.assertContains(page, "Showing: paid by Jan")
+
     def test_no_start_page_the_app_opens_on_transactions(self):
         self.assertRedirects(self.client.get("/"), reverse("transactions"), fetch_redirect_response=False)
         self.assertRedirects(self.client.get("/", follow=True),
@@ -169,7 +183,7 @@ class GoogleLoginTests(TestCase):
         self.assertFalse(user.has_usable_password())
         self.assertFalse(user.is_staff)
         self.assertEqual(int(self.client.session["_auth_user_id"]), user.pk)
-        self.assertContains(self.client.get(reverse("transactions")), '<span class="user" title="Ola Google">Ola Google</span>')
+        self.assertContains(self.client.get(reverse("transactions")), '>Ola Google</a>')
 
     def test_returning_google_user_reuses_account(self):
         self.google_login(google_profile())
@@ -269,7 +283,7 @@ class HeaderTests(TestCase):
         self.assertIn("Admin", self.nav(reverse("summary")))
 
     def test_a_long_name_can_still_be_read_in_full(self):
-        self.assertContains(self.client.get(reverse("summary")), '<span class="user" title="Jan Kowalski">Jan Kowalski</span>')
+        self.assertContains(self.client.get(reverse("summary")), 'title="Jan Kowalski – what you paid">Jan Kowalski</a>')
 
 
 class FormMarkupTests(TestCase):
