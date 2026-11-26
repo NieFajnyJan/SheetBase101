@@ -110,14 +110,8 @@ main { max-width: 520px; margin: 2rem auto 3rem; padding: 0 1rem; }
 body.wide main { max-width: 1100px; }
 .section-title { margin: 2.5rem 0 .75rem; font-size: 1.3rem; }
 
-/* Add form centred; a column of links and extras beside it, under it on narrow screens. */
-.forms { display: grid; grid-template-columns: 1fr minmax(0, 500px) 1fr; gap: 1.25rem; align-items: start; }
-.forms > .form-card { grid-column: 2; }
-.forms > .side { grid-column: 3; max-width: 280px; display: grid; gap: 1rem; }
-@media (max-width: 900px) {
-  .forms { grid-template-columns: minmax(0, 520px); justify-content: center; }
-  .forms > .form-card, .forms > .side { grid-column: 1; max-width: none; }
-}
+/* An add form: no wider than it needs, under its button. */
+.forms { max-width: 520px; }
 
 /* ---------- Cards ---------- */
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
@@ -127,11 +121,14 @@ body.wide main { max-width: 1100px; }
 .card h1 { font-size: 1.4rem; }
 .card h2 { font-size: 1.15rem; margin: 0 0 .25rem; }
 .card p { margin: .75rem 0; }
-/* A card that is a link (to the other page). */
-.switch { display: flex; align-items: center; justify-content: space-between; font-weight: 600;
-          color: var(--brand); text-decoration: none; padding: 1rem 1.25rem;
-          transition: background var(--ease), box-shadow var(--ease), transform var(--ease); }
-.switch:hover { background: var(--surface-hover); box-shadow: var(--shadow-lg); text-decoration: none; }
+/* The add form, closed under its button until it's wanted (a <details>: the button is its <summary>). */
+.page-first { margin-top: 0; }
+.adder { margin: 0 0 1.25rem; }
+.adder > summary { list-style: none; }
+.adder > summary::-webkit-details-marker { display: none; }
+/* No heading in the card any more (the button above names it): its first line starts at the top. */
+.adder .form-card > p:first-of-type { margin-top: 0; }
+.adder[open] > summary { margin-bottom: 1rem; background: var(--surface); color: var(--brand); border-color: var(--field-border); }
 details.card { padding: 1rem 1.25rem; }
 details.card > summary { cursor: pointer; font-weight: 600; list-style-position: inside; }
 details.card > summary:hover { color: var(--brand-hover); }

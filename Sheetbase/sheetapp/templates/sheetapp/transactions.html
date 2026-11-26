@@ -10,32 +10,31 @@
 
 {% block content %}
   <h1 class="visually-hidden">Transactions</h1>
-  <div class="forms">
-    <form class="card form-card" method="post" id="add-form">
-      {% csrf_token %}
-      {# Enter in a box presses the form's first button: this copy of Add, as Add shop (under “Paid to”) comes before Add. #}
-      <button class="visually-hidden" tabindex="-1" aria-hidden="true">Add</button>
-      <h2>Add done transaction</h2>
-      {% if paying %}
-        <p class="msg">Marking as paid: <strong>{{ paying }}</strong>. Change the amount, description or date, then click Add.
-          “Paid by” and “paid to” stay as they are: for a different payment, <a href="{% url 'transactions' %}">add it here instead</a>.</p>
-      {% else %}
-        <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
-      {% endif %}
-      {% include "sheetapp/_add_form_fields.html" with no_split=paying %}
-      {% if kept_ticks %}{# the debts ticked on the confirmation screen, ticked again there after Add #}
-        <input type="hidden" name="ticked_for" value="{{ kept_ticks.key }}">
-        {% for pk in kept_ticks.debts %}<input type="hidden" name="debts" value="{{ pk }}">{% endfor %}
-      {% endif %}
-      <button class="btn">Add</button>
-    </form>
-
-    <div class="side">
-      <a class="card switch" href="{% url 'planned' %}">Debts <span aria-hidden="true">→</span></a>
+  <h2 class="section-title page-first" id="done">Done transactions</h2>
+  {% comment %}Adding isn't what people come to the page for, so the list comes first and the form opens with this button –
+  or by itself when it has something to show: an error, Mark paid, what was being typed. Works without JavaScript too.{% endcomment %}
+  <details class="adder"{% if form_open %} open{% endif %}>
+    <summary class="btn">+ Add done transaction</summary>
+    <div class="forms">
+      <form class="card form-card" method="post" id="add-form">
+        {% csrf_token %}
+        {# Enter in a box presses the form's first button: this copy of Add, as Add shop (under “Paid to”) comes before Add. #}
+        <button class="visually-hidden" tabindex="-1" aria-hidden="true">Add</button>
+        {% if paying %}
+          <p class="msg">Marking as paid: <strong>{{ paying }}</strong>. Change the amount, description or date, then click Add.
+            “Paid by” and “paid to” stay as they are: for a different payment, <a href="{% url 'transactions' %}">add it here instead</a>.</p>
+        {% else %}
+          <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
+        {% endif %}
+        {% include "sheetapp/_add_form_fields.html" with no_split=paying %}
+        {% if kept_ticks %}{# the debts ticked on the confirmation screen, ticked again there after Add #}
+          <input type="hidden" name="ticked_for" value="{{ kept_ticks.key }}">
+          {% for pk in kept_ticks.debts %}<input type="hidden" name="debts" value="{{ pk }}">{% endfor %}
+        {% endif %}
+        <button class="btn">Add</button>
+      </form>
     </div>
-  </div>
-
-  <h2 class="section-title" id="done">Done transactions</h2>
+  </details>
 
   {# Filtering comes back to this list, not to the top of the page. #}
   <form class="card filters" method="get" action="{% url 'transactions' %}#done">

@@ -147,6 +147,8 @@ def transactions(request):
         done = filter_form.filter(done)
     return render(request, "sheetapp/transactions.html", {
         "form": form,
+        # Open when it has something to show: what was sent (an error, Back), Mark paid, or the draft kept over adding a shop.
+        "form_open": bool(sent or paying or draft),
         "paying": paying,
         "shop_form": shop_form,
         "filter_form": filter_form,
@@ -355,6 +357,7 @@ def planned(request):
              .prefetch_related("source__corrections"))
     return render(request, "sheetapp/planned.html", {
         "form": form,
+        "form_open": request.method == "POST",  # sent but not saved: an error, or Back from the shares
         "debts": debts,
         "total": debts.aggregate(t=Sum("amount"))["t"] or 0,
         "owed_to_me": balances(debts, request.user, "creditor"),
