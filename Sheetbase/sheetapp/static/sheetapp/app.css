@@ -90,7 +90,9 @@ code { font-size: .9em; background: var(--surface-2); padding: .1em .35em; borde
 .site-header nav a[aria-current="page"] { font-weight: 700; background: rgb(255 255 255 / .12); box-shadow: inset 0 -3px 0 var(--accent); }
 .site-header .account { display: flex; align-items: center; gap: .6rem; min-width: 0; }
 /* A long name is cut short (all of it shows on hover). */
-.site-header .user { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .92; }
+.site-header .user { max-width: 16ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: .92;
+                     padding: .35rem .5rem; border-radius: var(--radius-sm); transition: background var(--ease); }
+.site-header .user:hover { background: rgb(255 255 255 / .12); opacity: 1; }
 .site-header form { margin: 0; }
 .site-header button {
   background: none; border: 1px solid rgb(255 255 255 / .55); border-radius: var(--radius-sm);

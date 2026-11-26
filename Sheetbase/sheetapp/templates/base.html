@@ -26,7 +26,8 @@
       </nav>
       {% endwith %}
       <div class="account">
-        <span class="user" title="{{ user }}">{{ user }}</span>
+        {# Your own: the done transactions you paid (the list's “Paid by” filter, set to you). #}
+        <a class="user" href="{% url 'transactions' %}?payer={{ user.pk }}#done" title="{{ user }} – what you paid">{{ user }}</a>
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Log out</button></form>
       </div>
     {% else %}
