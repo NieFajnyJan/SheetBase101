@@ -65,6 +65,10 @@ def group_shops(field):
     field.widget.choices = empty + [(name, options) for name, options in groups if options]
 
 
+# The last option of the add form's “Paid to”: opens the box for adding a shop, right under it.
+ADD_SHOP = "add-shop"
+
+
 class TransactionForm(forms.ModelForm):
     class Meta:
         model = Transaction
@@ -335,6 +339,10 @@ class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
                 self.initial[name] = who.pk
             self.fields["split"].disabled = True
             self.initial["split"] = False
+        else:
+            recipient = self.fields["recipient"]
+            recipient.widget.choices = [*recipient.widget.choices, (ADD_SHOP, "+ Add shop…")]
+            recipient.help_text += " A shop that isn't listed: “+ Add shop…” at the end of the list."
 
     def split_creditor(self):
         return self.cleaned_data["payer"]
@@ -344,6 +352,9 @@ class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
 
     def clean(self):
         data = super().clean()
+        if self.data.get("recipient") == ADD_SHOP and "recipient" in self.errors:  # Add, not Add shop
+            self.errors["recipient"] = self.error_class(
+                ["Type the new shop's name below and click Add shop – or pick who was paid from the list."])
         if not data.get("split"):
             self.drop_split_errors()
             return data

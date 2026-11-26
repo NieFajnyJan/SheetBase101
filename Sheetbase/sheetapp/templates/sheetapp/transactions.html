@@ -13,6 +13,8 @@
   <div class="forms">
     <form class="card form-card" method="post" id="add-form">
       {% csrf_token %}
+      {# Enter in a box presses the form's first button: this copy of Add, as Add shop (under “Paid to”) comes before Add. #}
+      <button class="visually-hidden" tabindex="-1" aria-hidden="true">Add</button>
       <h2>Add done transaction</h2>
       {% if paying %}
         <p class="msg">Marking as paid: <strong>{{ paying }}</strong>. Change the amount, description or date, then click Add.
@@ -30,19 +32,6 @@
 
     <div class="side">
       <a class="card switch" href="{% url 'planned' %}">Debts <span aria-hidden="true">→</span></a>
-      {# Collapsed by default; stays open when the shop form has an error. #}
-      <details class="card"{% if shop_form.errors %} open{% endif %}>
-        <summary>+ Add shop</summary>
-        <p class="muted">Shop missing from “paid to”? Add it here.</p>
-        {% comment %}Part of the add form (form="add-form"), so what's typed there comes back after adding the shop.
-        formnovalidate: the purchase doesn't have to be filled in to add a shop.{% endcomment %}
-        <div class="field">
-          <label for="id_name">Shop name:</label>
-          {% if shop_form.name.errors %}<ul class="errorlist" id="id_name_error">{% for e in shop_form.name.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
-          <input type="text" name="name" id="id_name" maxlength="100" form="add-form"{% if shop_form.name.value %} value="{{ shop_form.name.value }}"{% endif %}{% if shop_form.name.errors %} aria-describedby="id_name_error"{% endif %}>
-        </div>
-        <button class="btn" name="add_shop" form="add-form" formnovalidate>Add shop</button>
-      </details>
     </div>
   </div>
 

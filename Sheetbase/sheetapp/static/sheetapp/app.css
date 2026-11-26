@@ -175,6 +175,11 @@ form > p > div > div > label, .card div[id] > div > label { display: flex; gap: 
 .btn:hover { background: var(--brand-hover); border-color: var(--brand-hover); color: #fff; text-decoration: none; box-shadow: var(--shadow); }
 .btn:active { transform: translateY(1px); }
 .btn-secondary { background: var(--surface); color: var(--brand); border-color: var(--field-border); }
+/* Adding a shop, right under “Paid to”: a quiet panel that belongs to the dropdown above it. */
+.add-shop { margin: -.4rem 0 1rem; padding: .8rem; background: var(--surface-2); border-radius: var(--radius);
+            display: flex; flex-wrap: wrap; align-items: end; gap: .6rem; }
+.add-shop .field { flex: 1 1 12rem; margin: 0; }
+.add-shop[hidden] { display: none; }
 .btn-secondary:hover { background: var(--surface-hover); color: var(--brand-hover); border-color: var(--brand); }
 /* Destroys or undoes something (Delete, Cancel transaction): red, so it never looks like the usual next step. */
 .btn-danger { background: var(--danger); border-color: var(--danger); }

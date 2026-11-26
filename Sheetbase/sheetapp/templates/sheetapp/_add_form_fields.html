@@ -4,6 +4,7 @@
 hiding the wrapper (as splitting does with “owes”) would leave the box itself showing.{% endcomment %}
 {% for field in form.main_fields %}
   <div class="field field-{{ field.name }}">{{ field.as_field_group }}</div>
+  {% if field.name == "recipient" and shop_form and not no_split %}{% include "sheetapp/_add_shop.html" %}{% endif %}
 {% endfor %}
 {% for field in form.hidden_fields %}{{ field }}{% endfor %}
 {% if not no_split %}
