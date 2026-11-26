@@ -5,10 +5,10 @@ from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
 from django.db.models import Case, DecimalField, Exists, F, Max, OuterRef, Q, Subquery, Sum, Value, When
-from django.db.models.functions import Coalesce, ExtractMonth
+from django.db.models.functions import Coalesce, ExtractMonth, Round
 from django.utils import timezone
 
-from .models import Transaction, User
+from .models import PlannedTransaction, Transaction, User
 
 ZERO = Decimal("0.00")
 AMOUNT = DecimalField(max_digits=12, decimal_places=2)
@@ -160,3 +160,28 @@ def all_time_summary():
     """Everything so far. Per member, months count from their own first transaction
     to the latest transaction in the app."""
     return summarise(Transaction.objects.with_current(), count_months=True)
+
+
+def net_debts():
+    """One query, a table of (debtor, creditor, net): for each pair with open debts, what the debtor owes the
+    creditor minus what the creditor owes back (the spreadsheet's I62, netted), where that's above 0."""
+    open_debts = PlannedTransaction.objects.open().order_by()
+    owed_back = (open_debts.filter(debtor=OuterRef("creditor"), creditor=OuterRef("debtor")).values("debtor")
+                 .annotate(amount=Sum("amount")).values("amount"))
+    # Rounded to whole grosze: SQLite sums decimals with a long tail, and 0.0000001 isn't owing anything.
+    net = Round(Sum("amount") - Coalesce(Subquery(owed_back), Value(ZERO)), 2, output_field=AMOUNT)
+    return open_debts.values("debtor", "creditor").annotate(net=net).filter(net__gt=0)
+
+
+def who_owes_whom():
+    """Open debts as a grid, like the spreadsheet's “Winien” (L4): a row per member who owes, a column per
+    member owed, and in each cell what's left after netting the two: what the row owes the column minus what
+    the column owes the row, or 0 when that's below 0. Owing yourself is None. Only rows and columns with
+    something in them: a member who owes nobody (after netting) has no row, one nobody owes has no column.
+    Returns (columns, [(row member, [cell per column])])."""
+    net = {(row["debtor"], row["creditor"]): row["net"].quantize(ZERO) for row in net_debts()}
+    people = list(User.objects.filter(pk__in={pk for pair in net for pk in pair}))  # User ordering: by name
+    rows = [u for u in people if any(a == u.pk for a, _ in net)]
+    columns = [u for u in people if any(b == u.pk for _, b in net)]
+    return columns, [(debtor, [None if debtor == creditor else net.get((debtor.pk, creditor.pk), ZERO)
+                               for creditor in columns]) for debtor in rows]

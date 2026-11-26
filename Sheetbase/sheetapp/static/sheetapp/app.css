@@ -349,6 +349,9 @@ tr.history > td { background: var(--surface-hover); white-space: normal; }
 .period h2 { margin: 1rem 0 .5rem; font-size: 1.25rem; }
 .period h3 { margin: 1.25rem 0 .5rem; }
 .all-time { background: #eef2ff; border-color: #6366f1; }
+.owes-whom { background: #f0f9ff; border-color: #0ea5e9; }
+/* Who owes whom: owing yourself isn't possible, so that cell is greyed out. */
+.grid td.self { background: var(--surface-2); }
 .this-year { background: var(--accent-soft); border-color: var(--accent); }
 .last-year { background: var(--warning-soft); border-color: var(--warning-edge); }
 .month-by-month { background: var(--surface-2); border-color: #94a3b8; }
