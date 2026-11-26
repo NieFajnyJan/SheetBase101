@@ -1,0 +1,31 @@
+{% comment %}Under “Paid to” on the Transactions page: a shop missing from the list is added here. Shown when “+ Add shop…”
+is picked in “Paid to” (always, without JavaScript). Adding it keeps what's typed in the form and picks the shop.
+formnovalidate: the purchase doesn't have to be filled in to add a shop.{% endcomment %}
+<div class="add-shop">
+  <div class="field">
+    <label for="id_name">New shop's name:</label>
+    {% if shop_form.name.errors %}<ul class="errorlist" id="id_name_error">{% for e in shop_form.name.errors %}<li>{{ e }}</li>{% endfor %}</ul>{% endif %}
+    <input type="text" name="name" id="id_name" maxlength="100"{% if shop_form.name.value %} value="{{ shop_form.name.value }}"{% endif %}{% if shop_form.name.errors %} aria-describedby="id_name_error"{% endif %}>
+  </div>
+  <button class="btn btn-secondary" name="add_shop" formnovalidate>Add shop</button>
+</div>
+<script>
+  (() => {
+    const box = document.currentScript.previousElementSibling;
+    const select = box.closest("form").querySelector('select[name="recipient"]');
+    const name = box.querySelector('input[name="name"]');
+    const update = () => { box.hidden = select.value !== "add-shop"; };
+    select.addEventListener("change", () => {
+      update();
+      if (!box.hidden) name.focus();
+    });
+    // Enter in the name adds the shop (elsewhere in the form it adds the transaction).
+    name.addEventListener("keydown", e => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        box.querySelector('button[name="add_shop"]').click();
+      }
+    });
+    update();
+  })();
+</script>

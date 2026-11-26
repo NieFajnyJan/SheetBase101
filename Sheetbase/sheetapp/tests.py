@@ -357,9 +357,45 @@ class KeepYourPlaceTests(TestCase):
         self.assertFalse(Transaction.objects.exists())
         self.assertIsNone(self.client.get(self.url).context["form"]["amount"].value())  # only once
 
-    def test_a_shop_can_be_added_with_the_purchase_still_empty(self):
+    def test_a_shop_is_added_from_paid_to(self):
         html = self.client.get(self.url).content.decode()
-        self.assertIn('<button class="btn" name="add_shop" form="add-form" formnovalidate>', html)
+        paid_to = html[html.index('<select name="recipient"'):]
+        paid_to = paid_to[:paid_to.index("</select>")]
+        self.assertTrue(paid_to.rstrip().endswith('<option value="add-shop">+ Add shop…</option>'))
+        # Right under “Paid to”, before Add; it can be sent with the purchase still empty.
+        box = html.index('<div class="add-shop">')
+        self.assertLess(html.index('<select name="recipient"'), box)
+        self.assertLess(box, html.index('<button class="btn btn-secondary" name="add_shop" formnovalidate>'))
+        self.assertLess(html.index('name="add_shop"'), html.index('<button class="btn">Add</button>'))
+        # Enter in a box still adds the transaction: the form's first button is (a copy of) Add.
+        form = html[html.index('id="add-form"'):]
+        self.assertRegex(form[:form.index("</form>")], r'^[^<]*>\s*<input type="hidden" name="csrfmiddlewaretoken"[^>]*>\s*'
+                         r'<button class="visually-hidden" tabindex="-1" aria-hidden="true">Add</button>')
+        self.assertNotIn("<summary>+ Add shop</summary>", html)  # no separate box beside the form any more
+
+    def test_add_shop_picked_but_add_clicked_says_what_to_do(self):
+        response = self.client.post(self.url, {"amount": "5", "payer": self.jan.pk, "recipient": "add-shop",
+                                               "description": "Kawa", "date": today().strftime("%d.%m.%Y")})
+        self.assertContains(response, "Type the new shop&#x27;s name below and click Add shop")
+        self.assertFalse(Transaction.objects.exists())
+
+    def test_a_shop_name_that_cant_be_used_keeps_the_box_open(self):
+        User.objects.create(username="shop-biedronka", email="b@example.com", first_name="Biedronka", is_shop=True)
+        response = self.client.post(self.url, {"amount": "5", "payer": self.jan.pk, "recipient": "add-shop",
+                                               "add_shop": "", "name": "Biedronka"})
+        self.assertContains(response, "This shop already exists.")
+        self.assertContains(response, '<option value="add-shop" selected>+ Add shop…</option>')
+        self.assertContains(response, 'value="Biedronka"')
+
+    def test_no_add_shop_when_marking_a_debt_paid(self):
+        debt = PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
+                                                 description="Kawa", created_by=self.jan)
+        # Back on the confirmation screen: the form, with “paid by” and “paid to” fixed to the debt's.
+        page = self.client.post(f"{self.url}?pay={debt.pk}", {
+            "amount": "5", "description": "Kawa", "date": today().strftime("%d.%m.%Y"), "back": ""})
+        self.assertContains(page, "Marking as paid:")
+        self.assertContains(page, '<select name="recipient"')
+        self.assertNotContains(page, "add-shop")
 
     def test_payment_confirmation_survives_a_reload(self):
         debt = PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
