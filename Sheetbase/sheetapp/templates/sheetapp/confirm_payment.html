@@ -10,45 +10,32 @@
     {% csrf_token %}
     {% for field in form %}{{ field.as_hidden }}{% endfor %}
     <input type="hidden" name="plan" value="{{ plan.signature }}">
-    <input type="hidden" name="choosing" value="1">
-    <input type="hidden" name="ticked_for" value="{{ ticks_key }}">
 
     <h1>Confirm payment</h1>
     <p><strong>{{ payment.date|day }} · {{ payment.payer|party }} → {{ payment.recipient|party }} · {{ payment.description }} · {{ payment.amount|zl }}</strong></p>
 
     {% if plan.debts %}
-      {# A group of tick boxes: the question above them is its legend, read out with each box. #}
-      <fieldset class="debts">
-      {% if paying %}
-        <legend>This payment of {{ payment.amount|zl }} is for “{{ paying.description }}”, so that stays ticked. Tick other debts too if it pays them as well.</legend>
-      {% else %}
-        <legend>What is this payment of {{ payment.amount|zl }} for? The oldest debts are ticked, as far as the money goes; change the ticks if it's for something else.</legend>
-      {% endif %}
-      <ul class="covers">
-        {% for debt, ticked, status in plan.rows %}
-          <li{% if debt.pk in changed_debts %} class="changed"{% endif %}><label>
-            {% if debt.pk == paying.pk %}
-              {# The debt being marked paid: always ticked. A disabled box isn't sent, so the hidden one is. #}
-              <input type="checkbox" checked disabled>
-              <input type="hidden" name="debts" value="{{ debt.pk }}">
-            {% else %}
-              <input type="checkbox" name="debts" value="{{ debt.pk }}"{% if ticked %} checked{% endif %}>
-            {% endif %}
+      <p id="covers-title">
+        {% if paying %}This payment of {{ payment.amount|zl }} pays “{{ paying.description }}” first, then
+          {{ payment.payer }}'s other debts to {{ payment.recipient }}, oldest first, as far as the money goes:
+        {% else %}This payment of {{ payment.amount|zl }} pays {{ payment.payer }}'s debts to {{ payment.recipient }},
+          oldest first, as far as the money goes:{% endif %}</p>
+      <ul class="covers" aria-labelledby="covers-title">
+        {% for debt, _, status in plan.rows %}
+          <li{% if debt.pk in changed_debts %} class="changed"{% endif %}>
             <span class="what">{{ debt.description }}{% if debt.tag %} <span class="muted">({{ debt.tag }})</span>{% endif %}
               {# Two debts can read the same: when it was added and the purchase it came from tell them apart. #}
               <span class="origin">added {{ debt.created_at|day }}{% if debt.source_id %} · from the purchase
                 “{{ debt.source.current.description }}” of {{ debt.source.current.date|day }}{% endif %}</span>
               {% if status == "paid" %}<span class="status paid">paid</span>
               {% elif status == "partly" %}<span class="status partly">paid, but {{ plan.leftover.amount|zl }} of it stays owed</span>
-              {% elif status == "ran_out" %}<span class="status ran_out">not paid – the money ran out</span>
-              {% else %}<span class="status">&nbsp;</span>{% endif %}
+              {% else %}<span class="status ran_out">not paid – the money ran out</span>{% endif %}
               {% if debt.pk in changed_debts %}<span class="changed-note">Changed – check it</span>{% endif %}
             </span>
             <span class="num">{{ debt.amount|zl }}</span>
-          </label></li>
+          </li>
         {% endfor %}
       </ul>
-      </fieldset>
     {% else %}
       <p>{{ payment.payer }} doesn't owe {{ payment.recipient }} anything.</p>
     {% endif %}
@@ -73,35 +60,6 @@
       {% else %}
         <button class="btn btn-secondary" name="back">Back</button>
       {% endif %}
-      {% if plan.debts %}<button class="btn btn-secondary" name="recalculate" id="recalculate">Update</button>{% endif %}
     </div>
-    <p class="updating" id="updating" role="status"></p>
   </form>
-  <script>
-    // Ticking or unticking a debt recalculates straight away (the Update button does the same without JavaScript).
-    // The page reloads, so it comes back at the same scroll position with the same tick box focused.
-    const recalc = document.getElementById("recalculate");
-    if (recalc) {
-      recalc.hidden = true;
-      try {
-        const kept = JSON.parse(sessionStorage.getItem("confirm-payment") || "null");
-        sessionStorage.removeItem("confirm-payment");
-        if (kept) {
-          window.scrollTo(0, kept.y);
-          document.querySelector(`input[name="debts"][value="${kept.debt}"]`)?.focus({ preventScroll: true });
-        }
-      } catch (e) {}
-      document.querySelectorAll('input[name="debts"]').forEach(box =>
-        box.addEventListener("change", () => {
-          try {
-            sessionStorage.setItem("confirm-payment", JSON.stringify({ y: window.scrollY, debt: box.value }));
-          } catch (e) {}
-          // While it reloads: says so, and the boxes wait (a second tick would be lost).
-          document.getElementById("updating").textContent = "Updating…";
-          document.querySelectorAll('input[name="debts"]').forEach(b => { b.style.pointerEvents = "none"; });
-          document.querySelector(".covers").setAttribute("aria-busy", "true");
-          box.form.requestSubmit(recalc);
-        }));
-    }
-  </script>
 {% endblock %}

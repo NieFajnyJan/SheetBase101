@@ -1,5 +1,5 @@
 """Paying debts: a done transaction between two members settles what the payer owes the person
-paid – oldest first unless the payer ticks others – and whatever doesn't match
+paid – oldest first (Mark paid: the debt clicked first) – and whatever doesn't match
 exactly becomes a new planned transaction (a leftover).
 Purchases and returns (anything to or from a shop) never touch debts."""
 
@@ -34,8 +34,9 @@ class Leftover:
 
 @dataclass
 class PaymentPlan:
-    """What a payment would do. `debts` are all the payer's open debts to the person paid (oldest first),
-    `chosen` the ones the payment is for; of those, `covered` get settled, and the leftover, if any, is created."""
+    """What a payment would do. `debts` are all the payer's open debts to the person paid, in the order it
+    pays them; `chosen` the ones the payment is for; of those, `covered` get settled, and the leftover, if any,
+    is created."""
 
     debts: list[PlannedTransaction] = field(default_factory=list)
     chosen: set[int] = field(default_factory=set)
@@ -69,8 +70,8 @@ class PaymentPlan:
         return {pk for pk, _ in paid_before.items() ^ paid_now.items()}, leftover_before != now["leftover"]
 
     def rows(self):
-        """For the confirmation screen: each open debt, whether it's ticked, and what happens to it:
-        "paid", "partly" (paid, but a rest stays owed), "ran_out" (ticked but no money left) or ""."""
+        """For the confirmation screen: each open debt, whether the payment is for it, and what happens to it:
+        "paid", "partly" (paid, but a rest stays owed), "ran_out" (for it, but no money left) or ""."""
         covered = {d.pk for d in self.covered}
         last = self.covered[-1] if self.covered else None
         # Underpaid: the leftover is owed by the payer, for the rest of the last covered debt.
@@ -91,16 +92,18 @@ def _clip(text):
     return text[:DESCRIPTION_MAX]
 
 
-def plan_payment(payer, recipient, amount, description, chosen=None, lock=False) -> PaymentPlan:
-    """Matches a payment of `amount` from payer to recipient against payer's open debts to recipient.
-    `chosen`: ids of the debts it's for (others are ignored); None picks them automatically."""
+def plan_payment(payer, recipient, amount, description, chosen=None, first=None, lock=False) -> PaymentPlan:
+    """Matches a payment of `amount` from payer to recipient against payer's open debts to recipient,
+    as far as the money goes. `first`: the id of a debt to pay before the others (Mark paid on it).
+    `chosen`: ids of the only debts it's for (the admin's “Mark as paid”); None: all of them."""
     # Oldest first; debts added at the same moment go in the order they were saved, so the same
     # payment always picks the same debts.
     debts = (PlannedTransaction.objects.open().filter(debtor=payer, creditor=recipient)
              .order_by("created_at", "pk"))
     if lock:
         debts = debts.select_for_update()
-    plan = PaymentPlan(debts=list(debts))
+    debts = sorted(debts, key=lambda debt: debt.pk != first)  # stable: the rest stay oldest first
+    plan = PaymentPlan(debts=debts)
     if chosen is not None:
         plan.chosen = {debt.pk for debt in plan.debts if debt.pk in chosen}
     remaining = amount
@@ -134,12 +137,12 @@ class PlanChanged(Exception):
         self.plan = plan
 
 
-def record_payment(payment: Transaction, chosen=None, expected_signature=None) -> PaymentPlan:
-    """Saves an unsaved payment between members and settles the chosen debts (None: picked
-    automatically), all at once or not at all."""
+def record_payment(payment: Transaction, chosen=None, first=None, expected_signature=None) -> PaymentPlan:
+    """Saves an unsaved payment between members and settles the debts it pays (see plan_payment),
+    all at once or not at all."""
     with db_transaction.atomic():
         plan = plan_payment(payment.payer, payment.recipient, payment.amount, payment.description,
-                            chosen=chosen, lock=True)
+                            chosen=chosen, first=first, lock=True)
         if expected_signature is not None and plan.signature() != expected_signature:
             raise PlanChanged(plan)
         payment.save()
