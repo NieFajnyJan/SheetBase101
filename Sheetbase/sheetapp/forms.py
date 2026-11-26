@@ -274,30 +274,23 @@ class OnceMixin:
         return super().save(commit)
 
 
-SPLIT_FIELDS = ["split", "participants", "split_amount", "split_seed"]
+SPLIT_FIELDS = ["split", "participants", "split_seed"]
 
 
 class SplitMixin:
-    """Adds splitting to an add form: a tick box, the members taking part (all ticked to start with)
-    and a hidden seed that decides who gets leftover grosze. The form's own fields come first."""
+    """Adds splitting a purchase to the add form: a tick box (ticked to start with), the members taking part
+    (all ticked to start with) and a hidden seed that decides who gets leftover grosze. The whole amount is
+    split. The form's own fields come first."""
 
-    def add_split_fields(self, split_amount=False):
-        self.fields["split"] = forms.BooleanField(required=False, label="Split between people")
+    def add_split_fields(self):
+        self.fields["split"] = forms.BooleanField(required=False, label="Split between people", initial=True)
         members = User.objects.filter(is_shop=False, is_active=True)
         self.fields["participants"] = forms.ModelMultipleChoiceField(
             members, required=False, widget=forms.CheckboxSelectMultiple, label="Who chips in",
             initial=lambda: list(members.values_list("pk", flat=True)))
-        if split_amount:
-            self.fields["split_amount"] = AmountField(
-                label="Amount to split", required=False, max_digits=10, decimal_places=2,
-                min_value=GROSZ, widget=AmountInput,
-                help_text="Leave empty to split the whole amount.")
-            # Shown on the “?” next to the label.
-            self.fields["split_amount"].hint = (
-                "Only part of the purchase is shared? Say you bought 3 chairs for 4606,16 zł, but only one "
-                "of them is for everyone: enter 1535,39 (one chair) here. The purchase is still recorded as "
-                "4606,16 zł, and only 1535,39 zł is split between the people ticked.")
         self.fields["split_seed"] = new_id_field()
+        # The page shows the split section only for a purchase: paid by a member to a shop.
+        self.shop_ids = ",".join(str(pk) for pk in User.objects.filter(is_shop=True).values_list("pk", flat=True))
 
     def main_fields(self):
         return [f for f in self.visible_fields() if f.name not in SPLIT_FIELDS]
@@ -318,8 +311,8 @@ class SplitMixin:
 
     def split_plan(self):
         data = self.cleaned_data
-        return plan_split(self.split_creditor(), self.split_total(), data["participants"], data["description"],
-                          data.get("split_seed") or uuid.uuid4(), tag=data.get("tag", ""))
+        return plan_split(data["payer"], data["amount"], data["participants"], data["description"],
+                          data.get("split_seed") or uuid.uuid4())
 
 
 class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
@@ -329,7 +322,7 @@ class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
 
     def __init__(self, *args, paying=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.add_split_fields(split_amount=True)
+        self.add_split_fields()
         self.add_submission_field()
         if paying:
             # Disabled: whatever the page sends for these is ignored, the values below are used.
@@ -344,12 +337,6 @@ class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
             recipient.widget.choices = [*recipient.widget.choices, (ADD_SHOP, "+ Add shop…")]
             recipient.help_text += " A shop that isn't listed: “+ Add shop…” at the end of the list."
 
-    def split_creditor(self):
-        return self.cleaned_data["payer"]
-
-    def split_total(self):
-        return self.cleaned_data.get("split_amount") or self.cleaned_data["amount"]
-
     def clean(self):
         data = super().clean()
         if self.data.get("recipient") == ADD_SHOP and "recipient" in self.errors:  # Add, not Add shop
@@ -358,44 +345,26 @@ class AddTransactionForm(OnceMixin, SplitMixin, TransactionForm):
         if not data.get("split"):
             self.drop_split_errors()
             return data
-        payer, recipient, amount = data.get("payer"), data.get("recipient"), data.get("amount")
+        payer, recipient = data.get("payer"), data.get("recipient")
+        # The page hides the split for anything else; this is for when it can't (no JavaScript).
         if payer and recipient and (payer.is_shop or not recipient.is_shop):
-            self.add_error("split", "Splitting is for purchases: “paid by” a member, “paid to” a shop.")
+            self.add_error("split", "Splitting is for purchases: “paid by” a member, “paid to” a shop. "
+                                    "Untick “Split between people”.")
             return data
-        part = data.get("split_amount")
-        if part and amount and part > amount:
-            self.add_error("split_amount", "Can't split more than the amount paid.")
-        else:
-            self.check_split(data, payer, part or amount, "split_amount" if part else "amount")
+        self.check_split(data, payer, data.get("amount"), "amount")
         return data
 
 
-class AddPlannedForm(OnceMixin, SplitMixin, PlannedTransactionForm):
-    """The add form on the Planned page. When splitting, “owes” is replaced by the people who chip in:
-    each gets a planned transaction for their share, owed to “owed to”."""
+class AddPlannedForm(OnceMixin, PlannedTransactionForm):
+    """The add form on the Debts page: one debt. (Debts for everyone's share of a purchase come from
+    splitting it on the Transactions page.)"""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["debtor"].required = False  # checked in clean(): only needed when not splitting
-        self.add_split_fields()
         self.add_submission_field()
 
-    def split_creditor(self):
-        return self.cleaned_data["creditor"]
-
-    def split_total(self):
-        return self.cleaned_data["amount"]
-
-    def clean(self):
-        data = super().clean()
-        if data.get("split"):
-            data["debtor"] = None  # replaced by the people who chip in
-            self.check_split(data, data.get("creditor"), data.get("amount"), "amount")
-        else:
-            self.drop_split_errors()
-            if not data.get("debtor") and "debtor" not in self.errors:
-                self.add_error("debtor", forms.Field.default_error_messages["required"])
-        return data
+    def main_fields(self):  # all of them: no split section
+        return self.visible_fields()
 
 
 MONTHS = list(enumerate(MONTH_NAMES, start=1))

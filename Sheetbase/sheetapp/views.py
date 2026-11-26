@@ -113,6 +113,7 @@ def transactions(request):
         # Sent together with the add form, so what was typed there comes back, with the new shop picked.
         shop_form = ShopForm(data)
         draft = {k: (data.getlist(k) if k == "participants" else data[k]) for k in DRAFT_FIELDS if k in data}
+        draft["split"] = "split" in data  # unticked isn't sent: without this it would come back ticked
         if shop_form.is_valid():
             shop = shop_form.save()
             request.session[DRAFT] = {**draft, "recipient": shop.pk}
@@ -195,7 +196,7 @@ def mark_paid_problem(paying, payment, chosen):
 # The session keys: the payment confirmation shown after a redirect, and the add form's draft kept over
 # adding a shop. The draft keeps what was typed, not the form's ids (a new form gets new ones).
 PREVIEW, DRAFT = "payment_preview", "add_draft"
-DRAFT_FIELDS = ["amount", "payer", "recipient", "description", "date", "split", "participants", "split_amount"]
+DRAFT_FIELDS = ["amount", "payer", "recipient", "description", "date", "split", "participants"]
 
 
 def stored_form(lists):
@@ -275,8 +276,8 @@ def kept_ticks(data):
     return {"debts": data.getlist("debts"), "key": data.get("ticked_for", "")}
 
 
-def confirm_split(request, form, purchase=None):
-    """Splitting: first shows each person's share; saves the purchase (if any) and the shares only
+def confirm_split(request, form, purchase):
+    """Splitting a purchase: first shows each person's share; saves the purchase and the shares only
     when Confirm is clicked."""
     plan = form.split_plan()
     if "confirm" in request.POST:
@@ -285,8 +286,7 @@ def confirm_split(request, form, purchase=None):
         except AlreadyAdded:  # e.g. Confirm clicked twice
             messages.info(request, "Not saved again. This split was already added.")
         else:
-            added = f"{purchase} and " if purchase else ""
-            messages.success(request, f"Saved. Added: {added}{len(shares)} debt{'s' if len(shares) != 1 else ''}"
+            messages.success(request, f"Saved. Added: {purchase} and {len(shares)} debt{'s' if len(shares) != 1 else ''}"
                                       f" owed to {plan.creditor}.")
         return redirect(request.get_full_path())
     return render(request, "sheetapp/confirm_split.html", {"form": form, "plan": plan, "purchase": purchase})
@@ -339,11 +339,9 @@ def _change_transaction(request, pk, *, cancelling):
 
 @login_required
 def planned(request):
-    """Add a planned transaction (a debt), or split one between people, and see all open ones with their total."""
+    """Add a planned transaction (a debt) and see all open ones with their total."""
     form = AddPlannedForm(request.POST or None, initial={"creditor": request.user})
-    if request.method == "POST" and form.is_valid() and "back" not in request.POST:
-        if form.cleaned_data["split"]:
-            return confirm_split(request, form)
+    if request.method == "POST" and form.is_valid():
         debt = form.save(commit=False)
         debt.created_by = request.user
         try:
@@ -357,7 +355,7 @@ def planned(request):
              .prefetch_related("source__corrections"))
     return render(request, "sheetapp/planned.html", {
         "form": form,
-        "form_open": request.method == "POST",  # sent but not saved: an error, or Back from the shares
+        "form_open": request.method == "POST",  # sent but not saved: an error
         "debts": debts,
         "total": debts.aggregate(t=Sum("amount"))["t"] or 0,
         "owed_to_me": balances(request.user, "creditor"),

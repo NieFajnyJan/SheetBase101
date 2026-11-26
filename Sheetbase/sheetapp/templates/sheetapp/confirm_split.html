@@ -12,11 +12,7 @@
     <input type="hidden" name="split_seed" value="{{ plan.seed }}">
 
     <h1>Confirm split</h1>
-    {% if purchase %}
-      <p><strong>{{ purchase.date|day }} · {{ purchase.payer|party }} → {{ purchase.recipient|party }} · {{ purchase.description }} · {{ purchase.amount|zl }}</strong></p>
-    {% else %}
-      <p><strong>{{ plan.description }}</strong>{% if plan.tag %} <span class="muted">({{ plan.tag }})</span>{% endif %}</p>
-    {% endif %}
+    <p><strong>{{ purchase.date|day }} · {{ purchase.payer|party }} → {{ purchase.recipient|party }} · {{ purchase.description }} · {{ purchase.amount|zl }}</strong></p>
 
     <p>{{ plan.amount|zl }} ÷ {{ plan.shares|length }} {{ plan.shares|length|pluralize:"person,people" }} =
       <strong>{% if plan.lowest == plan.highest %}{{ plan.lowest|zl }}{% else %}{{ plan.lowest|zl }}–{{ plan.highest|zl }}{% endif %} each</strong></p>
