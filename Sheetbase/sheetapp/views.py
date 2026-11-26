@@ -68,15 +68,11 @@ def transactions_with_history():
         Prefetch("settled_debts", queryset=PlannedTransaction.objects.order_by("created_at", "pk")))
 
 
-def home(request):
-    return render(request, "sheetapp/home.html")
-
-
 @require_GET
 def login_page(request):
     """Only shows the "Continue with ..." buttons – there are no local passwords."""
     if request.user.is_authenticated:
-        return redirect("home")
+        return redirect("transactions")
     return render(request, "registration/login.html")
 
 
