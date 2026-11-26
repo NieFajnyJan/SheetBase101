@@ -154,7 +154,6 @@ def transactions(request):
         "shop_form": shop_form,
         "filter_form": filter_form,
         "filters_valid": valid,
-        "kept_ticks": kept_ticks(data),
         # The filters in use, for Correct and Cancel to come back to.
         "history_query": urlencode({k: request.GET[k] for k in filter_form.fields if request.GET.get(k)}),
         "filtered": any(request.GET.get(f) for f in filter_form.fields),
@@ -179,20 +178,6 @@ def debt_to_mark_paid(request):
     return debt
 
 
-def mark_paid_problem(paying, payment, chosen):
-    """Why a Mark paid payment can't be saved like this, if it can't: it must pay (at least part of)
-    the debt Mark paid was clicked on. Other debts it may pay too; a payment for them alone, or a loan,
-    is added on the Transactions page."""
-    if paying.pk not in chosen:
-        return (f"Tick the debt this payment is for: “{paying.description}”. To pay other debts or lend "
-                "money instead, add the payment on the Transactions page.")
-    plan = plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
-    if paying.pk not in {d.pk for d in plan.covered}:
-        return (f"The money runs out before “{paying.description}”, the debt this payment is for. "
-                "Untick other debts or raise the amount.")
-    return None
-
-
 # The session keys: the payment confirmation shown after a redirect, and the add form's draft kept over
 # adding a shop. The draft keeps what was typed, not the form's ids (a new form gets new ones).
 PREVIEW, DRAFT = "payment_preview", "add_draft"
@@ -215,29 +200,19 @@ def here(request, **params):
 
 
 def confirm_payment(request, form, payment, paying=None, data=None):
-    """A payment between members: first shows which debts it settles and what's left over, with a
-    tick box per debt to choose what it's for; saves only when Confirm is clicked. `data`: what was sent.
-    Sent by a form, the screen is shown after a redirect (?preview), so reloading it doesn't send it again."""
+    """A payment between members: first shows which debts it pays – the payer's debts to the person paid,
+    oldest first, as far as the money goes (Mark paid: that debt first) – and what's left over; saves only
+    when Confirm is clicked. `data`: what was sent. Sent by a form, the screen is shown after a redirect
+    (?preview), so reloading it doesn't send it again."""
     data = request.POST if data is None else data
-    # On the screen itself the ticks decide (none ticked is a valid choice); arriving from the form,
-    # it's the debt being marked paid, or the debts are picked automatically.
-    chosen = {paying.pk} if paying else None
-    ticked = {int(pk) for pk in data.getlist("debts") if pk.isdigit()}
-    if "choosing" in data:
-        chosen = ticked
-    elif data.get("ticked_for") == ticks_key(payment):
-        # Back to the form and Add again: the ticks made before, as long as it's between the same people.
-        chosen = ticked | (chosen or set())
+    first = paying.pk if paying else None
     plan = None
     changed_debts, leftover_changed = set(), False  # what differs from the screen Confirm was clicked on
-    problem = paying and "confirm" in data and mark_paid_problem(paying, payment, chosen)
-    if problem:
-        messages.error(request, f"Not saved. {problem}")
-    elif "confirm" in data:
+    if "confirm" in data:
         try:
             # Once the first click has paid the debts, the plan differs too: then it's AlreadyAdded.
             save_once(Transaction, payment.submission, lambda: record_payment(
-                payment, chosen=chosen, expected_signature=data.get("plan", "")), also=(PlanChanged,))
+                payment, first=first, expected_signature=data.get("plan", "")), also=(PlanChanged,))
         except AlreadyAdded as e:  # e.g. Confirm clicked twice
             messages.info(request, f"Not saved again. Already added: {e.record}")
             return redirect("planned" if paying else here(request))
@@ -250,30 +225,18 @@ def confirm_payment(request, form, payment, paying=None, data=None):
             messages.success(request, f"Saved. Added: {payment}")
             return redirect("planned" if paying else here(request))
     if request.method == "POST":
-        # Shown after a redirect, from what was sent: the ticks as they are now, and what changed.
-        keep = {k: v for k, v in data.lists() if k not in ("csrfmiddlewaretoken", "confirm", "recalculate")}
+        # Shown after a redirect, from what was sent, and what changed.
+        keep = {k: v for k, v in data.lists() if k not in ("csrfmiddlewaretoken", "confirm")}
         request.session[PREVIEW] = {"data": keep, "changed": sorted(changed_debts),
                                     "leftover_changed": leftover_changed}
         return redirect(here(request, preview="1"))
     if (shown := request.session.get(PREVIEW)) and "preview" in request.GET:
         changed_debts, leftover_changed = set(shown["changed"]), shown["leftover_changed"]
-    plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, chosen=chosen)
+    plan = plan or plan_payment(payment.payer, payment.recipient, payment.amount, payment.description, first=first)
     return render(request, "sheetapp/confirm_payment.html", {
-        "form": form, "payment": payment, "plan": plan, "paying": paying, "ticks_key": ticks_key(payment),
+        "form": form, "payment": payment, "plan": plan, "paying": paying,
         "changed_debts": changed_debts, "leftover_changed": leftover_changed,
     })
-
-
-def ticks_key(payment):
-    """Which two people ticked debts belong to: kept over Back only while the payment is between them."""
-    return f"{payment.payer_id}-{payment.recipient_id}"
-
-
-def kept_ticks(data):
-    """Back from the payment confirmation: the debts ticked there, to send along with the form again."""
-    if "back" not in data or "choosing" not in data:
-        return None
-    return {"debts": data.getlist("debts"), "key": data.get("ticked_for", "")}
 
 
 def confirm_split(request, form, purchase):

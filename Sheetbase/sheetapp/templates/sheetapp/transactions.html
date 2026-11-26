@@ -27,10 +27,6 @@
           <p class="muted">A real payment that already happened. For a purchase, “paid to” is the shop.</p>
         {% endif %}
         {% include "sheetapp/_add_form_fields.html" with no_split=paying %}
-        {% if kept_ticks %}{# the debts ticked on the confirmation screen, ticked again there after Add #}
-          <input type="hidden" name="ticked_for" value="{{ kept_ticks.key }}">
-          {% for pk in kept_ticks.debts %}<input type="hidden" name="debts" value="{{ pk }}">{% endfor %}
-        {% endif %}
         <button class="btn">Add</button>
       </form>
     </div>

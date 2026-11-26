@@ -317,14 +317,15 @@ class FormMarkupTests(TestCase):
         self.assertContains(page, '<fieldset class="field-participants" aria-describedby="id_participants_error">')
         self.assertContains(page, '<ul class="errorlist" id="id_participants_error"><li>Tick at least one person')
 
-    def test_debts_to_tick_are_a_group_with_a_legend(self):
+    def test_debts_a_payment_pays_are_a_labelled_list_without_tick_boxes(self):
         PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
                                           description="Kawa", created_by=self.jan)
         page = self.client.post(reverse("transactions"), {
             "amount": "5", "payer": self.jan.pk, "recipient": self.ola.pk, "description": "Zwrot",
-            "date": today().strftime("%d.%m.%Y")})
-        self.assertContains(page, '<fieldset class="debts">')
-        self.assertContains(page, "<legend>What is this payment of 5,00\xa0zł for?")
+            "date": today().strftime("%d.%m.%Y")}, follow=True)
+        self.assertContains(page, '<ul class="covers" aria-labelledby="covers-title">')
+        self.assertContains(page, "This payment of 5,00\xa0zł pays jan's debts to ola,\n          oldest first")
+        self.assertNotContains(page, 'type="checkbox"')
 
 
 class HeadingsAndTablesTests(TestCase):
@@ -432,20 +433,11 @@ class KeepYourPlaceTests(TestCase):
             screen = client.get(response.url)
             self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
         self.assertFalse(Transaction.objects.exists())
-        done = client.post(response.url, {**data, "choosing": "1", "debts": [debt.pk], "confirm": "",
-                                          "plan": screen.context["plan"].signature()})
+        done = client.post(response.url, {**data, "confirm": "", "plan": screen.context["plan"].signature()})
         self.assertRedirects(done, self.url, fetch_redirect_response=False)
         self.assertEqual(Transaction.objects.count(), 1)
         # The old address shows the page, not the screen again.
         self.assertTemplateUsed(client.get(response.url), "sheetapp/transactions.html")
-
-    def test_ticking_a_debt_says_it_is_updating(self):
-        PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
-                                          description="Kawa", created_by=self.jan)
-        screen = self.client.post(self.url, {"amount": "5", "payer": self.jan.pk, "recipient": self.ola.pk,
-                                             "description": "Zwrot", "date": today().strftime("%d.%m.%Y")})
-        self.assertContains(screen, '<p class="updating" id="updating" role="status"></p>')
-        self.assertContains(screen, '"Updating…"')
 
     def test_correct_and_cancel_come_back_to_the_filtered_history_on_that_row(self):
         t = Transaction.objects.create(amount=Decimal("10.00"), payer=self.jan, recipient=self.shop,
@@ -1816,9 +1808,9 @@ class PayingDebtsTests(TestCase):
     def test_screen_shows_what_is_covered_and_saves_nothing(self):
         self.debt("90.00", description="Krzesło")
         page = self.client.post(self.url, self.data("100,00"))
-        self.assertContains(page, "What is this payment of 100,00\xa0zł for?")
+        self.assertContains(page, "This payment of 100,00\xa0zł pays ola's debts to jan")
         self.assertContains(page, "Krzesło")
-        self.assertContains(page, 'type="checkbox" name="debts"')
+        self.assertNotContains(page, 'type="checkbox"')  # nothing to pick: it pays what's owed
         self.assertContains(page, "Leftover: <strong>jan owes ola 10,00\xa0zł")
         self.assertFalse(Transaction.objects.exists())
         self.assertEqual(PlannedTransaction.objects.open().count(), 1)
@@ -1975,59 +1967,39 @@ class PayingDebtsTests(TestCase):
         self.assertTrue(mine.is_settled)
         self.assertFalse(any(r.is_settled for r in (ewas, reverse_debt, to_someone_else)))
 
-    # --- choosing what a payment is for
-    def choose(self, amount, debts, button="confirm", **kwargs):
-        """Posts the confirmation screen with these debts ticked."""
-        plan = plan_payment(self.ola, self.jan, Decimal(amount.replace(",", ".")), "Zwrot",
-                            chosen={d.pk for d in debts})
-        return self.client.post(self.url, self.data(amount, choosing="1", debts=[d.pk for d in debts],
-                                                    plan=plan.signature(), **{button: ""}, **kwargs))
-
-    def test_newer_debt_can_be_ticked_instead(self):
-        # Jan's case: he owed 100 + 98 + 890 and paid 890 for the tort, so he ticks just the tort.
+    # --- which debts a payment pays: all of them, oldest first, as far as the money goes
+    def test_oldest_first_as_far_as_the_money_goes(self):
+        # Owed 100 + 98 + 890 and paid 890: the two older ones are paid, and 198 of the tort stays owed.
         old, older = self.debt("100.00", description="za cokolwiek"), self.debt("98.00", description="retoryka")
         tort = self.debt("890.00", description="tort")
-        self.assertRedirects(self.choose("890.00", [tort]), self.url)
+        page = self.client.post(self.url, self.data("890.00"), follow=True)
+        self.assertEqual([status for _, _, status in page.context["plan"].rows()], ["paid", "paid", "partly"])
+        self.assertContains(page, "paid, but 198,00\xa0zł of it stays owed")
+        self.pay("890.00")
         old, older, tort = self.refresh(old, older, tort)
-        self.assertEqual([old.is_settled, older.is_settled, tort.is_settled], [False, False, True])
-        self.assertFalse(Transaction.objects.get().leftovers.exists())
+        self.assertEqual([old.is_settled, older.is_settled, tort.is_settled], [True, True, True])
+        rest = PlannedTransaction.objects.open().get()
+        self.assertEqual((rest.debtor, rest.amount, rest.description), (self.ola, Decimal("198.00"), "tort – rest"))
 
-    def test_pick_which_debts(self):
-        a, b, c = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
-        self.assertRedirects(self.choose("90.00", [a, c]), self.url)
-        a, b, c = self.refresh(a, b, c)
-        self.assertEqual([a.is_settled, b.is_settled, c.is_settled], [True, False, True])
-        left = PlannedTransaction.objects.get(created_by_payment__isnull=False)
-        self.assertEqual((left.debtor, left.amount), (self.jan, Decimal("20.00")))  # overpaid by 20
+    def test_the_money_runs_out(self):
+        self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
+        page = self.client.post(self.url, self.data("20.00"), follow=True)
+        self.assertEqual([status for _, _, status in page.context["plan"].rows()], ["partly", "", ""])
+        self.assertContains(page, "not paid – the money ran out", count=2)
+        self.assertFalse(Transaction.objects.exists())  # the screen doesn't save
 
-    def test_picked_debts_more_than_paid(self):
-        a, b, c = self.debt("30.00"), self.debt("50.00"), self.debt("40.00")
-        page = self.choose("60.00", [a, b, c], button="recalculate")
-        statuses = [status for _, _, status in page.context["plan"].rows()]
-        self.assertEqual(statuses, ["paid", "partly", "ran_out"])
-        self.assertContains(page, "paid, but 20,00\xa0zł of it stays owed")
-        self.assertFalse(Transaction.objects.exists())  # Update doesn't save
+    def test_more_than_owed_is_a_debt_the_other_way(self):
+        a, b = self.debt("30.00"), self.debt("50.00")
+        self.pay("100.00")
+        self.assertTrue(all(r.is_settled for r in self.refresh(a, b)))
+        left = PlannedTransaction.objects.open().get()
+        self.assertEqual((left.debtor, left.creditor, left.amount), (self.jan, self.ola, Decimal("20.00")))
 
-    def test_nothing_ticked_is_a_loan(self):
-        d = self.debt("30.00")
-        self.assertRedirects(self.choose("30.00", []), self.url)
-        self.assertFalse(self.refresh(d)[0].is_settled)
-        left = PlannedTransaction.objects.get(created_by_payment__isnull=False)
-        self.assertEqual((left.debtor, left.creditor, left.amount), (self.jan, self.ola, Decimal("30.00")))
-
-    def test_other_peoples_debts_cant_be_ticked(self):
+    def test_only_the_payers_debts_to_the_person_paid(self):
         mine, ewas = self.debt("30.00"), self.debt("30.00", debtor=self.ewa)
-        self.choose("30.00", [mine, ewas])
+        self.pay("30.00")
         self.assertTrue(self.refresh(mine)[0].is_settled)
         self.assertFalse(self.refresh(ewas)[0].is_settled)
-
-    def test_ticks_changed_without_update_shows_screen_again(self):
-        a, b = self.debt("30.00"), self.debt("50.00")
-        screen = self.client.post(self.url, self.data("30.00"))  # a is picked (oldest)
-        page = self.client.post(self.url, self.data("30.00", choosing="1", debts=[b.pk], confirm="",
-                                                    plan=screen.context["plan"].signature()))
-        self.assertContains(page, "please check it again")
-        self.assertFalse(Transaction.objects.exists())
 
     def test_plan_without_saving(self):
         d = self.debt("30.00")
@@ -2248,22 +2220,6 @@ class PayingDebtsTests(TestCase):
         self.assertContains(screen, f"{today():%d.%m.%Y}</time> · ola → jan")
         self.assertContains(screen, "from the purchase", count=1)
         self.assertContains(screen, "added <time", count=2)
-
-    def test_ticks_are_kept_when_going_back_to_the_form(self):
-        a, b = self.debt("30.00"), self.debt("50.00")
-        key = f"{self.ola.pk}-{self.jan.pk}"
-        form = self.choose("50.00", [b], button="back", ticked_for=key)
-        self.assertTemplateUsed(form, "sheetapp/transactions.html")
-        self.assertContains(form, f'<input type="hidden" name="debts" value="{b.pk}">')
-        screen = self.client.post(self.url, self.data("50.00", ticked_for=key, debts=[b.pk]))
-        self.assertEqual(screen.context["plan"].chosen, {b.pk})
-
-    def test_ticks_are_dropped_when_the_people_change(self):
-        a = self.debt("30.00", debtor=self.ewa)
-        b = self.debt("50.00", debtor=self.ewa)
-        screen = self.client.post(self.url, self.data("30.00", payer=self.ewa,
-                                                      ticked_for=f"{self.ola.pk}-{self.jan.pk}", debts=[b.pk]))
-        self.assertEqual(screen.context["plan"].chosen, {a.pk})  # picked automatically, oldest first
 
     # --- Messages
 
@@ -2791,11 +2747,13 @@ class MarkPaidTests(TestCase):
         payment = screen.context["payment"]
         self.assertEqual((payment.payer, payment.recipient, payment.amount, payment.description, payment.date),
                          (self.ola, self.jan, Decimal("890.00"), "Tort", today()))
-        self.assertEqual([(r.pk, ticked) for r, ticked, _ in screen.context["plan"].rows()],
-                         [(older.pk, False), (d.pk, True)])  # only the debt clicked
+        # The debt clicked first, though the other is older; the money (890) is all it takes.
+        self.assertEqual([(r.pk, status) for r, _, status in screen.context["plan"].rows()],
+                         [(d.pk, "paid"), (older.pk, "")])
+        self.assertContains(screen, "pays “Tort” first, then")
         self.assertFalse(Transaction.objects.exists())  # nothing saved yet
         # Confirm from there records it.
-        response = self.client.post(self.pay_url(d), self.data(d, confirm="", choosing="1", debts=[d.pk],
+        response = self.client.post(self.pay_url(d), self.data(d, confirm="",
                                                                plan=screen.context["plan"].signature()))
         self.assertRedirects(response, reverse("planned"))
         d.refresh_from_db()
@@ -2805,7 +2763,7 @@ class MarkPaidTests(TestCase):
         d = self.debt()
         self.client.force_login(self.ola)
         self.assertContains(self.client.get(self.pay_url(d)), "Change details")
-        page = self.client.post(self.pay_url(d), self.data(d, back="", choosing="1", debts=[d.pk]))
+        page = self.client.post(self.pay_url(d), self.data(d, back=""))
         self.assertTemplateUsed(page, "sheetapp/transactions.html")
         form = page.context["form"]
         # Who paid whom comes from the debt (fixed), the rest from what was sent.
@@ -2834,57 +2792,24 @@ class MarkPaidTests(TestCase):
         screen = self.client.post(self.pay_url(d), self.data(d, split="on", participants=[self.ola.pk, self.jan.pk]))
         self.assertTemplateUsed(screen, "sheetapp/confirm_payment.html")
 
-    def test_the_debt_stays_ticked(self):
-        other = self.debt(description="Inny tort")  # same amount, older
+    def test_more_money_pays_the_other_debts_too(self):
+        other = self.debt(description="Inny tort")  # older
         d = self.debt()
         self.client.force_login(self.ola)
-        screen = self.client.get(self.pay_url(d))
-        self.assertContains(screen, '<input type="checkbox" checked disabled>', count=1)
-        self.assertContains(screen, f'<input type="hidden" name="debts" value="{d.pk}">')
-        self.assertContains(screen, f'<input type="checkbox" name="debts" value="{other.pk}">')
-        # Sent without it, ticking the other one instead: before, that paid the other one.
-        response = self.client.post(self.pay_url(d), self.data(d, confirm="", choosing="1", debts=[other.pk],
-                                                               plan=screen.context["plan"].signature()))
-        self.assertContains(response, "Tick the debt this payment is for: “Tort”")
-        self.assertFalse(Transaction.objects.exists())
-
-    def test_the_money_must_reach_the_debt(self):
-        other = self.debt(description="Inny tort")  # older, so it's paid first when both are ticked
-        d = self.debt()
-        self.client.force_login(self.ola)
-        both = self.data(d, choosing="1", debts=[other.pk, d.pk])
-        screen = self.client.post(self.pay_url(d), both)
-        response = self.client.post(self.pay_url(d), {**both, "confirm": "",
-                                                       "plan": screen.context["plan"].signature()})
-        self.assertContains(response, "The money runs out before “Tort”")
-        self.assertFalse(Transaction.objects.exists())
-        # Enough for both: fine, it pays them both.
-        both["amount"] = "1780.00"
-        screen = self.client.post(self.pay_url(d), both)
-        self.assertRedirects(self.client.post(self.pay_url(d), {**both, "confirm": "",
+        data = self.data(d, amount="1780.00")
+        screen = self.client.post(self.pay_url(d), data)
+        self.assertEqual([(r.pk, status) for r, _, status in screen.context["plan"].rows()],
+                         [(d.pk, "paid"), (other.pk, "paid")])
+        self.assertRedirects(self.client.post(self.pay_url(d), {**data, "confirm": "",
                                                                 "plan": screen.context["plan"].signature()}),
                              reverse("planned"))
         self.assertFalse(PlannedTransaction.objects.open().exists())
-
-    def test_confirm_with_nothing_ticked_is_refused(self):
-        d = self.debt()
-        self.client.force_login(self.ola)
-        screen = self.client.post(self.pay_url(d), self.data(d, choosing="1"))  # the debt unticked
-        response = self.client.post(self.pay_url(d), self.data(d, confirm="", choosing="1",
-                                                               plan=screen.context["plan"].signature()))
-        self.assertTemplateUsed(response, "sheetapp/confirm_payment.html")
-        self.assertContains(response, "Tick the debt this payment is for")
-        self.assertFalse(Transaction.objects.exists())
-        self.assertEqual(list(PlannedTransaction.objects.all()), [d])  # no loan the other way
 
     def test_marks_that_debt_paid_and_returns_to_planned(self):
         # Another debt of the same amount is older, but the one clicked is the one that gets paid.
         older = self.debt(description="Inny tort")
         d = self.debt()
         self.client.force_login(self.jan)  # the creditor records it
-        screen = self.client.post(self.pay_url(d), self.data(d))
-        self.assertEqual([(r.pk, ticked) for r, ticked, _ in screen.context["plan"].rows()],
-                         [(older.pk, False), (d.pk, True)])
         self.assertRedirects(self.mark_paid(d), reverse("planned"))
         pay = Transaction.objects.get()
         d.refresh_from_db()
