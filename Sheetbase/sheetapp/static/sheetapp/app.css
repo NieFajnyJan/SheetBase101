@@ -250,7 +250,6 @@ button.tag:hover { filter: brightness(.95); }
 /* A link to the purchase something came from: the colour of the text around it, underlined. */
 a.src, .paid-for a { color: inherit; text-decoration: underline; text-decoration-color: var(--muted); }
 a.src:hover, .paid-for a:hover { color: var(--brand); text-decoration-color: currentColor; }
-.home-cta { margin-top: 1.25rem; }
 
 /* ---------- Add form: splitting between people ---------- */
 .split { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem 1rem .25rem; margin: 1rem 0 1.25rem;

@@ -13,7 +13,7 @@
 <body class="{% block body_class %}{% endblock %}">
   <header class="site-header">
    <div class="inner">
-    <a class="brand" href="{% url 'home' %}"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#fff" fill-opacity=".15"/><g fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M8 11h16M8 16h16M8 21h10"/></g><circle cx="23" cy="21" r="3" fill="#10b981"/></svg>SheetBase</a>
+    <a class="brand" href="{% url 'transactions' %}"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="#fff" fill-opacity=".15"/><g fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"><path d="M8 11h16M8 16h16M8 21h10"/></g><circle cx="23" cy="21" r="3" fill="#10b981"/></svg>SheetBase</a>
     {% if user.is_authenticated %}
       {% with page=request.resolver_match.url_name %}
       <nav aria-label="Main">

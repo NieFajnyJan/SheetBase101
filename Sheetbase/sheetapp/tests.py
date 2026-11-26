@@ -82,12 +82,19 @@ class NoLocalAccountsTests(TestCase):
 
     def test_logged_in_user_redirected_away_from_login(self):
         self.client.force_login(User.objects.create_user("jan", "jan@example.com"))
-        self.assertRedirects(self.client.get(reverse("login")), reverse("home"))
+        self.assertRedirects(self.client.get(reverse("login")), reverse("transactions"))
+
+    def test_no_start_page_the_app_opens_on_transactions(self):
+        self.assertRedirects(self.client.get("/"), reverse("transactions"), fetch_redirect_response=False)
+        self.assertRedirects(self.client.get("/", follow=True),
+                             f"{reverse('login')}?next={reverse('transactions')}")  # logged out: log in first
+        self.client.force_login(User.objects.create_user("jan", "jan@example.com"))
+        html = self.client.get(reverse("planned")).content.decode()
+        self.assertIn(f'<a class="brand" href="{reverse("transactions")}">', html)
 
     def test_logout(self):
         self.client.force_login(User.objects.create_user("jan", "jan@example.com", first_name="Jan"))
-        self.assertContains(self.client.get(reverse("home")), "Hi, Jan!")
-        self.assertRedirects(self.client.post(reverse("logout")), reverse("home"))
+        self.assertRedirects(self.client.post(reverse("logout")), reverse("login"))
         self.assertNotIn("_auth_user_id", self.client.session)
 
 
@@ -155,14 +162,14 @@ class GoogleLoginTests(TestCase):
 
     def test_new_google_user_gets_an_account(self):
         response = self.google_login(google_profile())
-        self.assertRedirects(response, reverse("home"), fetch_redirect_response=False)
+        self.assertRedirects(response, reverse("transactions"), fetch_redirect_response=False)
         user = User.objects.get(email="ola.google@example.com")
         self.assertEqual((user.first_name, user.last_name), ("Ola", "Google"))
         self.assertTrue(user.username)
         self.assertFalse(user.has_usable_password())
         self.assertFalse(user.is_staff)
         self.assertEqual(int(self.client.session["_auth_user_id"]), user.pk)
-        self.assertContains(self.client.get(reverse("home")), "Hi, Ola!")
+        self.assertContains(self.client.get(reverse("transactions")), '<span class="user" title="Ola Google">Ola Google</span>')
 
     def test_returning_google_user_reuses_account(self):
         self.google_login(google_profile())
@@ -2416,7 +2423,7 @@ class PlannedPageTests(TestCase):
                              fetch_redirect_response=False)
 
     def test_in_menu(self):
-        self.assertContains(self.client.get(reverse("home")), f'href="{self.url}"')
+        self.assertContains(self.client.get(reverse("transactions")), f'href="{self.url}"')
 
     def test_switch_between_add_forms(self):
         self.assertContains(self.client.get(self.url), 'Done transactions <span aria-hidden="true">→</span>')
