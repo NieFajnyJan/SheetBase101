@@ -37,7 +37,7 @@ from .models import (
 )
 from .payments import PlanChanged, cancel_effects, plan_payment, record_payment
 from .splits import save_split
-from .summary import ZERO, all_time_summary, month_by_month, year_summary
+from .summary import ZERO, all_time_summary, month_by_month, who_owes_whom, year_summary
 
 
 class DebtGone(Exception):
@@ -438,6 +438,7 @@ def summary(request):
     today = timezone.localdate()
     return render(request, "sheetapp/summary.html", {
         "all_time": all_time_summary(),
+        "who_owes_whom": who_owes_whom(),
         "summaries": [year_summary(today.year), year_summary(today.year - 1)],
         "months": month_by_month(today.year),
         "this_year": today.year,

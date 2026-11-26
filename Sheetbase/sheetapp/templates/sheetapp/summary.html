@@ -56,6 +56,39 @@
   </section>
   {% endwith %}
 
+  {% with columns=who_owes_whom.0 rows=who_owes_whom.1 %}
+  <section class="period owes-whom">
+    <h2 id="who-owes-whom">Who owes whom</h2>
+    <p class="muted">Open debts as they stand now. Each row owes each column the amount shown – already netted:
+      what one owes the other minus what the other owes back. Someone who owes nobody has no row, someone nobody
+      owes has no column.</p>
+    {% if rows %}
+      <div class="table-wrap">
+        <table class="grid" aria-labelledby="who-owes-whom">
+          <thead>
+            <tr><th><span class="visually-hidden">Owes ↓, owed to →</span><span aria-hidden="true">owes ↓ · to →</span></th>
+              {% for m in columns %}<th class="num" scope="col">{{ m }}</th>{% endfor %}</tr>
+          </thead>
+          <tbody>
+            {% for debtor, cells in rows %}
+              <tr><th scope="row">{{ debtor }}</th>
+                {% for amount in cells %}
+                  {% if amount is None %}<td class="num self"></td>
+                  {% elif amount %}<td class="num"><strong>{{ amount|zl }}</strong></td>
+                  {% else %}<td class="num zero">–</td>{% endif %}
+                {% endfor %}
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% else %}
+      <p class="muted">Nobody owes anybody anything.</p>
+    {% endif %}
+    <p class="totals"><a href="{% url 'planned' %}">See the debts</a></p>
+  </section>
+  {% endwith %}
+
   {% for s in summaries %}
   <section class="period {% if forloop.first %}this-year{% else %}last-year{% endif %}">
     <h2>{{ s.year }}{% if forloop.first %} (this year){% else %} (last year){% endif %}</h2>

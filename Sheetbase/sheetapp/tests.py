@@ -1374,6 +1374,73 @@ class OldDateCorrectionTests(TestCase):
         self.assertContains(self.correct(self.old.replace(month=4)), "can be at most")
 
 
+class WhoOwesWhomTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.rafal = User.objects.create_user("rafal", "rafal@example.com", first_name="Rafał")
+        self.ewa = User.objects.create_user("ewa", "ewa@example.com", first_name="Ewa")
+        User.objects.create_user("ola", "ola@example.com", first_name="Ola")  # no debts: not in the grid
+        self.url = reverse("summary")
+        self.client.force_login(self.jan)
+
+    def debt(self, debtor, creditor, amount, settled_by=None):
+        PlannedTransaction.objects.create(debtor=debtor, creditor=creditor, amount=Decimal(amount), description="x",
+                                          created_by=creditor, settled_by=settled_by,
+                                          settled_at=timezone.now() if settled_by else None)
+
+    def test_netted_like_the_spreadsheet(self):
+        # The spreadsheet's example: Jan owes Rafał 104,50, Rafał owes Jan 39,47 – so Jan owes Rafał 65,03.
+        self.debt(self.jan, self.rafal, "100.00")
+        self.debt(self.jan, self.rafal, "4.50")
+        self.debt(self.rafal, self.jan, "39.47")
+        self.debt(self.ewa, self.jan, "10.00")
+        paid = Transaction.objects.create(amount=Decimal("5.00"), payer=self.ewa, recipient=self.rafal,
+                                          created_by=self.ewa, description="x")
+        self.debt(self.ewa, self.rafal, "5.00", settled_by=paid)  # paid: doesn't count
+        columns, rows = self.client.get(self.url).context["who_owes_whom"]
+        # By name. Ewa owes and isn't owed: a row, no column. Rafał is owed but owes nothing after netting:
+        # a column, no row.
+        self.assertEqual(columns, [self.jan, self.rafal])
+        self.assertEqual(rows, [(self.ewa, [Decimal("10.00"), Decimal("0.00")]),
+                                (self.jan, [None, Decimal("65.03")])])
+
+    def test_even_pairs_leave_no_row_or_column(self):
+        self.debt(self.jan, self.rafal, "20.00")
+        self.debt(self.rafal, self.jan, "20.00")
+        self.assertEqual(self.client.get(self.url).context["who_owes_whom"], ([], []))
+        self.assertContains(self.client.get(self.url), "Nobody owes anybody anything.")
+
+    def test_even_down_to_the_grosz(self):
+        # 0,10 + 0,20 isn't exactly 0,30 in floating point; the database adds up in it on SQLite.
+        self.debt(self.jan, self.rafal, "0.10")
+        self.debt(self.jan, self.rafal, "0.20")
+        self.debt(self.rafal, self.jan, "0.30")
+        self.assertEqual(self.client.get(self.url).context["who_owes_whom"], ([], []))
+
+    def test_counted_in_one_query(self):
+        from .summary import who_owes_whom
+        self.debt(self.jan, self.rafal, "10.00")
+        self.debt(self.rafal, self.jan, "4.00")
+        self.debt(self.ewa, self.jan, "1.00")
+        with self.assertNumQueries(2):  # the netted table, then who's in it (for their names)
+            columns, rows = who_owes_whom()
+        self.assertEqual(rows, [(self.ewa, [Decimal("1.00"), Decimal("0.00")]), (self.jan, [None, Decimal("6.00")])])
+
+    def test_shown_as_a_grid(self):
+        self.debt(self.jan, self.rafal, "65.03")
+        html = self.client.get(self.url).content.decode()
+        table = html[html.index('aria-labelledby="who-owes-whom"'):]
+        table = table[:table.index("</table>")]
+        self.assertRegex(table, r'to →</span></th>\s*<th class="num" scope="col">Rafał</th></tr>')  # the one owed: one column
+        self.assertRegex(table, r'<th scope="row">Jan</th>\s*<td class="num"><strong>65,03\xa0zł</strong></td>\s*</tr>')
+        self.assertNotIn('scope="row">Rafał', table)  # owes nobody: no row
+        self.assertNotIn("Ola", table)
+        self.assertNotIn("Active debts", html)  # replaced by this grid
+
+    def test_nobody_owes_anything(self):
+        self.assertContains(self.client.get(self.url), "Nobody owes anybody anything.")
+
+
 class YearlySummaryTests(TestCase):
     def setUp(self):
         self.jan = User.objects.create_user("jan", "jan@example.com")
