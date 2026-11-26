@@ -311,8 +311,9 @@ class FormMarkupTests(TestCase):
         self.assertTrue(group.split(">", 1)[1].lstrip().startswith("<legend>Who chips in</legend>"))
 
     def test_an_error_about_who_chips_in_is_linked_to_the_group(self):
-        page = self.client.post(reverse("planned"), {"creditor": self.jan.pk, "amount": "10", "description": "Pizza",
-                                                     "split": "on", "participants": [self.jan.pk]})
+        page = self.client.post(reverse("transactions"), {
+            "amount": "10", "payer": self.jan.pk, "recipient": User.objects.get(username=SHOP_USERNAME).pk,
+            "description": "Pizza", "date": today().strftime("%d.%m.%Y"), "split": "on", "participants": [self.jan.pk]})
         self.assertContains(page, '<fieldset class="field-participants" aria-describedby="id_participants_error">')
         self.assertContains(page, '<ul class="errorlist" id="id_participants_error"><li>Tick at least one person')
 
@@ -2994,8 +2995,11 @@ class SplitTests(TestCase):
         self.assertEqual(set(form.fields["participants"].queryset), {self.jan, self.ola, self.ewa})
         self.assertEqual(set(form["participants"].value()), {self.jan.pk, self.ola.pk, self.ewa.pk})
         self.assertContains(page, "Tick everyone")
-        self.assertContains(page, "only one of them is for everyone")  # the “?” next to Amount to split
-        self.assertContains(self.client.get(self.planned_url), "Split between people")
+        self.assertIs(form["split"].value(), True)  # ticked to start with
+        self.assertNotContains(page, "Amount to split")  # the whole amount is split
+        shops = ",".join(str(pk) for pk in User.objects.filter(is_shop=True).values_list("pk", flat=True))
+        self.assertContains(page, f'<fieldset class="split" data-shops="{shops}">')  # shown for a purchase only
+        self.assertNotContains(self.client.get(self.planned_url), "Split between people")  # debts come from splits
 
     def test_purchase_split_between_everyone(self):
         screen = self.purchase()
@@ -3019,13 +3023,12 @@ class SplitTests(TestCase):
         self.purchase(people=[self.ola, self.ewa], confirm="")
         self.assertEqual(self.owed(), {(self.ola, self.jan): Decimal("15.00"), (self.ewa, self.jan): Decimal("15.00")})
 
-    def test_split_only_part_of_the_purchase(self):
+    def test_the_whole_amount_is_split(self):
         users = [self.jan, self.ola, self.ewa] + [User.objects.create_user(f"u{i}", f"u{i}@example.com") for i in (4, 5)]
-        screen = self.purchase(people=users, amount="4606,16", split_amount="1535,39")
+        screen = self.purchase(people=users, amount="1535,39", split_amount="100")  # an old page's field: ignored
         self.assertContains(screen, f"1{NBSP}535,39{NBSP}zł ÷ 5 people")
         self.assertContains(screen, f"307,07{NBSP}zł–307,08{NBSP}zł each")
-        self.purchase(people=users, amount="4606,16", split_amount="1535,39", confirm="")
-        self.assertEqual(Transaction.objects.get().amount, Decimal("4606.16"))
+        self.purchase(people=users, amount="1535,39", confirm="")
         shares = PlannedTransaction.objects.all()
         self.assertEqual(len(shares), 4)
         jan_share = Decimal("1535.39") - sum(s.amount for s in shares)
@@ -3063,9 +3066,6 @@ class SplitTests(TestCase):
             ({"payer": self.shop.pk, "recipient": self.jan.pk}, "split"),  # a return
             ({"participants": [self.jan.pk]}, "participants"),  # nobody besides the payer
             ({"participants": []}, "participants"),
-            ({"split_amount": "31.00"}, "split_amount"),  # more than was paid
-            ({"split_amount": "0"}, "split_amount"),  # not “the whole amount”
-            ({"split_amount": "-5"}, "split_amount"),
             ({"amount": "0.02"}, "amount"),  # less than a grosz each
         ]
         for fields, error in cases:
@@ -3080,43 +3080,28 @@ class SplitTests(TestCase):
         self.assertFalse(PlannedTransaction.objects.exists())
 
     def test_unticking_split_ignores_what_was_typed_in_it(self):
-        # Typed into the split section, then unticked it: the hidden section can't block Add.
-        for split_amount in ("0", "abc", "31.00"):
-            response = self.purchase(split="", split_amount=split_amount, participants=[self.jan.pk])
-            self.assertRedirects(response, self.done_url, msg_prefix=split_amount)
+        # Ticked people in the split section, then unticked it: the hidden section can't block Add.
+        for people in ([self.jan.pk], ["abc"], [999999]):
+            response = self.purchase(split="", participants=people)
+            self.assertRedirects(response, self.done_url, msg_prefix=str(people))
         self.assertEqual(Transaction.objects.count(), 3)
         self.assertFalse(PlannedTransaction.objects.exists())
 
-    # --- from the Planned page
-    def planned(self, **fields):
-        data = {"creditor": self.ola.pk, "amount": "10,00", "description": "Pizza", "tag": "pizza",
-                "split": "on", "split_seed": self.seed, "participants": [self.jan.pk, self.ola.pk, self.ewa.pk]}
-        return self.client.post(self.planned_url, {**data, **fields})
+    # --- the Debts page: no splitting (its debts come from splitting a purchase)
+    def test_adding_a_shop_keeps_split_as_it_was(self):
+        for ticked in (True, False):
+            data = {"amount": "5", "payer": self.jan.pk, "recipient": "add-shop", "add_shop": "",
+                    "name": f"Sklep {ticked}", **({"split": "on"} if ticked else {})}
+            self.client.post(self.done_url, data)
+            self.assertIs(self.client.get(self.done_url).context["form"]["split"].value(), ticked)
 
-    def test_split_from_the_planned_form(self):
-        self.assertTemplateUsed(self.planned(), "sheetapp/confirm_split.html")
-        self.assertFalse(PlannedTransaction.objects.exists())
-        self.assertRedirects(self.planned(confirm=""), self.planned_url)
-        shares = PlannedTransaction.objects.all()
-        self.assertEqual({s.debtor for s in shares}, {self.jan, self.ewa})  # owed to Ola, so not her
-        self.assertEqual({(s.creditor, s.tag, s.source) for s in shares}, {(self.ola, "pizza", None)})
-        self.assertIn(sum(s.amount for s in shares), {Decimal("6.66"), Decimal("6.67")})
-        self.assertFalse(Transaction.objects.exists())
-
-    def test_planned_split_ignores_owes(self):
-        self.planned(debtor=self.ola.pk, confirm="")  # same as “owed to”, but not used
-        self.assertEqual(PlannedTransaction.objects.count(), 2)
-
-    def test_planned_without_split_needs_owes(self):
-        response = self.planned(split="")
-        self.assertTrue(response.context["form"].errors["debtor"])
-        self.planned(split="", debtor=self.ewa.pk)
+    def test_debts_form_adds_one_debt_and_ignores_a_split(self):
+        data = {"debtor": self.ewa.pk, "creditor": self.ola.pk, "amount": "10,00", "description": "Pizza",
+                "split": "on", "participants": [self.jan.pk, self.ola.pk, self.ewa.pk]}  # e.g. from an old page
+        self.assertRedirects(self.client.post(self.planned_url, data), self.planned_url)
         self.assertEqual(self.owed(), {(self.ewa, self.ola): Decimal("10.00")})
-
-    def test_planned_unticking_split_ignores_what_was_typed_in_it(self):
-        response = self.planned(split="", debtor=self.ewa.pk, participants=[self.ola.pk], split_seed="nonsense")
-        self.assertRedirects(response, self.planned_url)
-        self.assertEqual(self.owed(), {(self.ewa, self.ola): Decimal("10.00")})
+        response = self.client.post(self.planned_url, {**data, "debtor": ""})
+        self.assertTrue(response.context["form"].errors["debtor"])  # “owes” is needed, as for any debt
 
     # --- cancelling and correcting the purchase
     def split_purchase(self):
@@ -3160,9 +3145,9 @@ class PurchaseLinkTests(TestCase):
         self.shop = User.objects.get(username=SHOP_USERNAME)
         self.client.force_login(self.jan)
         self.client.post(reverse("transactions"), {
-            "amount": "4606,16", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "3 fotele",
+            "amount": "20.00", "payer": self.jan.pk, "recipient": self.shop.pk, "description": "3 fotele",
             "date": today().strftime("%d/%m/%y"), "split": "on", "split_seed": str(uuid.uuid4()),
-            "split_amount": "20.00", "participants": [self.jan.pk, self.ola.pk], "confirm": ""})
+            "participants": [self.jan.pk, self.ola.pk], "confirm": ""})
         self.purchase = Transaction.objects.get()
         self.share = PlannedTransaction.objects.get()  # Ola owes Jan 10,00
 
@@ -3176,7 +3161,7 @@ class PurchaseLinkTests(TestCase):
         page = self.client.get(reverse("planned"))
         # The description itself links to the purchase; hovering shows the purchase's full amount.
         self.assertContains(page, f'<a class="src" href="{reverse("transactions")}#t-{self.purchase.pk}" '
-                                  f'title="From the purchase: 3 fotele, 4{NBSP}606,16{NBSP}zł">3 fotele</a>')
+                                  f'title="From the purchase: 3 fotele, 20,00{NBSP}zł">3 fotele</a>')
         self.assertContains(self.client.get(reverse("transactions")), f'id="t-{self.purchase.pk}"')
 
     def test_shows_the_purchase_as_corrected(self):

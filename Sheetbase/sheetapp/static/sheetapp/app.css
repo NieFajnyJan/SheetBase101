@@ -253,6 +253,7 @@ a.src:hover, .paid-for a:hover { color: var(--brand); text-decoration-color: cur
 /* ---------- Add form: splitting between people ---------- */
 .split { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: .5rem 1rem .25rem; margin: 1rem 0 1.25rem;
          background: var(--surface-hover); }
+.split[hidden] { display: none; }  /* not a purchase: no split */
 .split legend { padding: 0 .35rem; }
 .split .split-toggle { display: flex; align-items: center; gap: .5rem; margin: 0; cursor: pointer; }
 .split-body > p:first-child { margin-top: .25rem; }
@@ -265,19 +266,6 @@ a.src:hover, .paid-for a:hover { color: var(--brand); text-decoration-color: cur
 .field-participants > div label { display: flex; align-items: center; gap: .5rem; font-weight: 400; margin: 0; cursor: pointer; }
 .tick-all { background: none; border: 0; padding: 0; font: inherit; font-size: .9rem; color: var(--brand); text-decoration: underline; cursor: pointer; }
 .tick-all:hover { color: var(--brand-hover); text-decoration-thickness: 2px; }
-/* The “?” next to “Amount to split”: the explanation shows on hover, on keyboard focus and on tap, and Escape
-   closes it. It opens from the start of its row, not from the “?”, so it's never wider than the form. */
-.label-row { position: relative; display: flex; align-items: baseline; gap: .4rem; }
-.label-row label { margin-bottom: .3rem; }
-.hint { display: inline-flex; align-items: center; justify-content: center; width: 1.2rem; height: 1.2rem;
-        border-radius: 50%; background: var(--brand-soft); color: var(--brand); font-size: .8rem; font-weight: 700; cursor: help; }
-.hint-text { display: none; position: absolute; left: 0; top: 100%; z-index: 10; width: 100%; max-width: 320px;
-             background: var(--brand); color: #fff; font-weight: 400; font-size: .85rem; line-height: 1.45;
-             padding: .7rem .85rem; border-radius: var(--radius-sm); box-shadow: var(--shadow-lg); }
-.hint:hover .hint-text, .hint:focus .hint-text { display: block; }
-.hint.closed .hint-text { display: none; }
-/* Bridges the gap between the “?” and the explanation, so moving the mouse onto it doesn't close it. */
-.hint-text::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: .8rem; }
 
 /* ---------- Date box with its calendar button ---------- */
 .date-row { display: flex; gap: .4rem; align-items: stretch; }

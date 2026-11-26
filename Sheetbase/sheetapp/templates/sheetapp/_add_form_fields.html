@@ -1,19 +1,21 @@
 {# An add form’s own fields, then the “Split between people” section (left out with no_split). #}
 {{ form.non_field_errors }}
-{% comment %}A div, not a p: the help text and errors inside are blocks, which would end a p early – and then
-hiding the wrapper (as splitting does with “owes”) would leave the box itself showing.{% endcomment %}
+{# A div, not a p: the help text and errors inside are blocks, which would end a p early. #}
 {% for field in form.main_fields %}
   <div class="field field-{{ field.name }}">{{ field.as_field_group }}</div>
   {% if field.name == "recipient" and shop_form and not no_split %}{% include "sheetapp/_add_shop.html" %}{% endif %}
 {% endfor %}
 {% for field in form.hidden_fields %}{{ field }}{% endfor %}
 {% if not no_split %}
-  <fieldset class="split">
+  {% comment %}Splitting is for a purchase: paid by a member to a shop (or a shop being added). For anything else
+  the section is hidden and switched off, so it isn't sent – a payment between members is never split.
+  Without JavaScript it always shows, and the server refuses a split that isn't a purchase.{% endcomment %}
+  <fieldset class="split" data-shops="{{ form.shop_ids }}">
     <legend><label class="split-toggle">{{ form.split }} {{ form.split.label }}</label></legend>
     {{ form.split.errors }}
     <div class="split-body">
-      <p class="muted">Everyone you tick chips in an equal share. Each of them gets a debt for it,
-        except whoever is owed the money. Nothing is saved before you see the shares.</p>
+      <p class="muted">Everyone you tick chips in an equal share of the amount. Each of them gets a debt for it,
+        except whoever paid. Nothing is saved before you see the shares.</p>
       {# A group of tick boxes: the legend names it, and an error about it is read out with it. #}
       {% with f=form.participants %}
         <fieldset class="field-participants"{% if f.errors %} aria-describedby="{{ f.auto_id }}_error"{% endif %}>
@@ -22,35 +24,32 @@ hiding the wrapper (as splitting does with “owes”) would leave the box itsel
           {{ f }}
         </fieldset>
       {% endwith %}
-      {% if form.split_amount %}
-        {% with f=form.split_amount %}
-          <div class="field">
-            <span class="label-row">{{ f.label_tag }}
-              <span class="hint" tabindex="0" role="note" aria-label="{{ f.field.hint }}">?<span class="hint-text" aria-hidden="true">{{ f.field.hint }}</span></span>
-            </span>
-            {{ f.errors }}{{ f }}
-            <span class="helptext" id="{{ f.auto_id }}_helptext">{{ f.help_text }}</span>
-          </div>
-        {% endwith %}
-      {% endif %}
     </div>
   </fieldset>
   <script>
-    // The members list shows only when “Split between people” is ticked; on the Planned form it replaces “owes”.
     (() => {
-      const tick = document.currentScript.parentElement.querySelector('input[name="split"]');
-      const body = tick.closest(".split").querySelector(".split-body");
-      const debtor = tick.form.querySelector(".field-debtor");
+      const section = document.currentScript.previousElementSibling;
+      const tick = section.querySelector('input[name="split"]');
+      const body = section.querySelector(".split-body");
+      const form = tick.form;
+      const payer = form.querySelector('select[name="payer"]');
+      const recipient = form.querySelector('select[name="recipient"]');
+      const shops = section.dataset.shops.split(",");
+      // A purchase: a member pays a shop (or the shop being added under “Paid to”).
+      const isPurchase = () => !shops.includes(payer.value)
+        && (shops.includes(recipient.value) || recipient.value === "add-shop");
       const update = () => {
-        body.hidden = !tick.checked;
-        if (debtor) debtor.hidden = tick.checked;
+        const purchase = isPurchase();
+        section.hidden = !purchase;
+        tick.disabled = !purchase;  // not sent: no split
+        body.hidden = !tick.checked;  // the members list shows only when “Split between people” is ticked
       };
-      tick.addEventListener("change", update);
+      [tick, payer, recipient].forEach(el => el.addEventListener("change", update));
       update();
 
       // One click ticks everyone (or, once all are ticked, unticks everyone).
-      const boxes = [...tick.form.querySelectorAll('input[name="participants"]')];
-      const all = tick.form.querySelector(".tick-all");
+      const boxes = [...section.querySelectorAll('input[name="participants"]')];
+      const all = section.querySelector(".tick-all");
       const label = () => {
         all.textContent = boxes.every(b => b.checked) ? "Untick everyone" : "Tick everyone";
       };
@@ -62,15 +61,6 @@ hiding the wrapper (as splitting does with “owes”) would leave the box itsel
       boxes.forEach(b => b.addEventListener("change", label));
       all.hidden = boxes.length === 0;
       label();
-
-      // Escape closes the “?” explanation – also when it's open because the mouse is over it.
-      // It opens again the next time it's hovered, focused or tapped.
-      const hint = tick.form.querySelector(".hint");
-      if (hint) {
-        document.addEventListener("keydown", e => { if (e.key === "Escape") hint.classList.add("closed"); });
-        ["mouseenter", "focus"].forEach(name => hint.addEventListener(name, () => hint.classList.remove("closed")));
-        hint.addEventListener("click", () => hint.classList.remove("closed"));
-      }
     })();
   </script>
 {% endif %}

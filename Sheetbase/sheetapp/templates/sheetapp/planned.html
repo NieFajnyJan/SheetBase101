@@ -9,14 +9,14 @@
   <h1 class="visually-hidden">Debts</h1>
   <h2 class="section-title page-first">Open debts</h2>
   {% comment %}Adding isn't what people come to the page for, so the list comes first and the form opens with this button –
-  or by itself when it has something to show: an error, or Back from the shares. Works without JavaScript too.{% endcomment %}
+  or by itself when it has something to show: an error. Works without JavaScript too.{% endcomment %}
   <details class="adder"{% if form_open %} open{% endif %}>
     <summary class="btn">+ Add debt</summary>
     <div class="forms">
       <form class="card form-card" method="post">
         {% csrf_token %}
         <p class="muted">A debt: someone owes someone money. Nothing has been paid yet.</p>
-        {% include "sheetapp/_add_form_fields.html" %}
+        {% include "sheetapp/_add_form_fields.html" with no_split=True %}
         <button class="btn">Add</button>
       </form>
     </div>
