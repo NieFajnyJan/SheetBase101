@@ -7,42 +7,20 @@
 
 {% block content %}
   <h1 class="visually-hidden">Debts</h1>
-  <div class="forms">
-    <form class="card form-card" method="post">
-      {% csrf_token %}
-      <h2>Add debt</h2>
-      <p class="muted">A debt: someone owes someone money. Nothing has been paid yet.</p>
-      {% include "sheetapp/_add_form_fields.html" %}
-      <button class="btn">Add</button>
-    </form>
-    <div class="side">
-      <a class="card switch" href="{% url 'transactions' %}">Done transactions <span aria-hidden="true">→</span></a>
+  <h2 class="section-title page-first">Open debts</h2>
+  {% comment %}Adding isn't what people come to the page for, so the list comes first and the form opens with this button –
+  or by itself when it has something to show: an error, or Back from the shares. Works without JavaScript too.{% endcomment %}
+  <details class="adder"{% if form_open %} open{% endif %}>
+    <summary class="btn">+ Add debt</summary>
+    <div class="forms">
+      <form class="card form-card" method="post">
+        {% csrf_token %}
+        <p class="muted">A debt: someone owes someone money. Nothing has been paid yet.</p>
+        {% include "sheetapp/_add_form_fields.html" %}
+        <button class="btn">Add</button>
+      </form>
     </div>
-  </div>
-
-  <h2 class="section-title">Your balance</h2>
-  <div class="balances">
-    {% with rows=owed_to_me.0 sum=owed_to_me.1 %}
-      <section class="card">
-        <h3 id="owed-to-me">Owed to me</h3>
-        {% if rows %}
-          <table aria-labelledby="owed-to-me">{% for person, amount in rows %}<tr><th scope="row">{{ person }}</th><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
-            <tfoot><tr><th scope="row">Total</th><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
-        {% else %}<p class="muted">Nobody owes you anything.</p>{% endif %}
-      </section>
-    {% endwith %}
-    {% with rows=i_owe.0 sum=i_owe.1 %}
-      <section class="card">
-        <h3 id="i-owe">I owe</h3>
-        {% if rows %}
-          <table aria-labelledby="i-owe">{% for person, amount in rows %}<tr><th scope="row">{{ person }}</th><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
-            <tfoot><tr><th scope="row">Total</th><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
-        {% else %}<p class="muted">You don't owe anyone anything.</p>{% endif %}
-      </section>
-    {% endwith %}
-  </div>
-
-  <h2 class="section-title">Open debts</h2>
+  </details>
   {% if debts %}
     <div class="table-wrap">
       <table>
@@ -66,4 +44,26 @@
   {% else %}
     <p class="card empty">No open debts – nobody owes anything.</p>
   {% endif %}
+
+  <h2 class="section-title">Your balance</h2>
+  <div class="balances">
+    {% with rows=owed_to_me.0 sum=owed_to_me.1 %}
+      <section class="card">
+        <h3 id="owed-to-me">Owed to me</h3>
+        {% if rows %}
+          <table aria-labelledby="owed-to-me">{% for person, amount in rows %}<tr><th scope="row">{{ person }}</th><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
+            <tfoot><tr><th scope="row">Total</th><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
+        {% else %}<p class="muted">Nobody owes you anything.</p>{% endif %}
+      </section>
+    {% endwith %}
+    {% with rows=i_owe.0 sum=i_owe.1 %}
+      <section class="card">
+        <h3 id="i-owe">I owe</h3>
+        {% if rows %}
+          <table aria-labelledby="i-owe">{% for person, amount in rows %}<tr><th scope="row">{{ person }}</th><td class="num">{{ amount|zl }}</td></tr>{% endfor %}
+            <tfoot><tr><th scope="row">Total</th><td class="num">{{ sum|zl }}</td></tr></tfoot></table>
+        {% else %}<p class="muted">You don't owe anyone anything.</p>{% endif %}
+      </section>
+    {% endwith %}
+  </div>
 {% endblock %}

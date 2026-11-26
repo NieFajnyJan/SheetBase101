@@ -486,7 +486,7 @@ class SameWordsAndNumbersTests(TestCase):
     def test_open_debts_are_called_debts(self):
         nav = self.client.get(reverse("planned")).content.decode()
         self.assertIn('aria-current="page">Debts</a>', nav)
-        self.assertIn("<h2>Add debt</h2>", nav)
+        self.assertIn('<summary class="btn">+ Add debt</summary>', nav)
         self.assertNotIn("lanned transaction", nav[nav.index("<main>"):])
 
     def test_description_hint_fits_payments_and_loans_too(self):
@@ -905,7 +905,8 @@ class TransactionListTests(TestCase):
         # The total sits under Amount: the cells before it span the columns before Amount.
         for url, before in ((self.url, 3), (reverse("planned"), 2)):
             html = self.client.get(url).content.decode()
-            foot = html[html.rindex("<tfoot>"):html.rindex("</tfoot>")]  # the list is the page's last table
+            listed = html[html.index('<div class="table-wrap">'):]  # the list, not the balances
+            foot = listed[listed.index("<tfoot>"):listed.index("</tfoot>")]
             self.assertIn(f'<td colspan="{before}">Total</td><td class="num">', foot, msg=url)
         self.assertEqual(fields(self.url), ["payer", "recipient", "amount", "description"])
         self.assertEqual(fields(reverse("planned")), ["debtor", "creditor", "amount", "description"])
@@ -2425,9 +2426,39 @@ class PlannedPageTests(TestCase):
     def test_in_menu(self):
         self.assertContains(self.client.get(reverse("transactions")), f'href="{self.url}"')
 
-    def test_switch_between_add_forms(self):
-        self.assertContains(self.client.get(self.url), 'Done transactions <span aria-hidden="true">→</span>')
-        self.assertContains(self.client.get(reverse("transactions")), 'Debts <span aria-hidden="true">→</span>')
+    def test_list_first_form_behind_a_button(self):
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                          description="Kawa", created_by=self.jan)
+        Transaction.objects.create(amount=Decimal("1.00"), payer=self.jan, recipient=User.objects.get(username=SHOP_USERNAME),
+                                   created_by=self.jan, description="Kawa")
+        for url, button in ((self.url, "+ Add debt"), (reverse("transactions"), "+ Add done transaction")):
+            html = self.client.get(url).content.decode()
+            main = html[html.index("<main>"):]
+            # The page starts with the list's heading, then the closed form under its button, then the list.
+            self.assertRegex(main, r'^<main>\s*(<div class="messages">.*?</div>\s*)?<h1 class="visually-hidden">[^<]*</h1>\s*'
+                                   r'<h2 class="section-title page-first"', msg=url)
+            self.assertIn(f'<details class="adder">\n    <summary class="btn">{button}</summary>', main, msg=url)
+            self.assertLess(main.index('class="adder"'), main.index("<table"), msg=url)
+        debts = self.client.get(self.url).content.decode()
+        self.assertLess(debts.index("Open debts"), debts.index("Your balance"))  # the list before the balances
+
+    def test_form_opens_by_itself_when_it_has_something_to_show(self):
+        opened = '<details class="adder" open>'
+        # Debts: a form sent with a mistake.
+        self.assertContains(self.client.post(self.url, {"debtor": self.ola.pk, "creditor": self.jan.pk,
+                                                        "amount": "", "description": "Kawa"}), opened)
+        url = reverse("transactions")
+        # Transactions: a mistake; Mark paid; what was typed, kept over adding a shop.
+        self.assertContains(self.client.post(url, {"amount": "", "payer": self.jan.pk}), opened)
+        debt = PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("5.00"),
+                                                 description="Kawa", created_by=self.jan)
+        page = self.client.post(f"{url}?pay={debt.pk}", {"amount": "5", "description": "Kawa",
+                                                          "date": today().strftime("%d.%m.%Y"), "back": ""})
+        self.assertContains(page, opened)
+        self.client.post(url, {"amount": "5", "payer": self.jan.pk, "recipient": "add-shop", "add_shop": "",
+                               "name": "Biedronka"})
+        self.assertContains(self.client.get(url), opened)
+        self.assertNotContains(self.client.get(url), opened)  # the draft is used once
 
     def test_add(self):
         self.assertRedirects(self.add(), self.url)
