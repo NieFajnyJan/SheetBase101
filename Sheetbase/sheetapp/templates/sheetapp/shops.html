@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block body_class %}page-shops{% endblock %}
+{% block title %}Shops · SheetBase{% endblock %}
+
+{% block content %}
+  <h1>Shops</h1>
+  <p class="muted">Fix a shop's name, or merge a shop into another one – a duplicate, or one added with a typo.
+    Merging moves all its transactions to the other shop, so none is lost. New shops are added on
+    <a href="{% url 'transactions' %}">Transactions</a>, under “Paid to”.</p>
+  {% if shops %}
+    <div class="table-wrap">
+      <table aria-label="Shops">
+        <thead><tr><th>Shop</th><th class="num">Transactions</th><th><span class="visually-hidden">Actions</span></th></tr></thead>
+        <tbody>
+          {% for shop in shops %}
+            <tr>
+              <th scope="row">{{ shop }}</th>
+              <td class="num">{{ shop.transactions }}</td>
+              <td class="row-actions"><a href="{% url 'edit_shop' shop.pk %}">Rename or merge</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <p class="card empty">No shops yet.</p>
+  {% endif %}
+{% endblock %}

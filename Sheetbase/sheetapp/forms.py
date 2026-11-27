@@ -8,7 +8,6 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils import timezone
 from django.utils.html import format_html
-from django.utils.text import slugify
 
 from .models import (
     CORRECTABLE_FIELDS,
@@ -18,6 +17,7 @@ from .models import (
     User,
     earliest_allowed_date,
 )
+from . import shops
 from .payments import loan_edits
 from .splits import GROSZ, plan_split
 from .summary import MONTH_NAMES
@@ -425,17 +425,42 @@ class ShopForm(forms.Form):
 
     def clean_name(self):
         name = self.cleaned_data["name"]
-        self.username = "shop-" + slugify(name, allow_unicode=True)
-        if self.username == "shop-":
-            raise forms.ValidationError("Enter a name with letters or digits.")
-        if (User.objects.filter(username=self.username).exists()
-                or User.objects.filter(is_shop=True, first_name__iexact=name).exists()):
-            raise forms.ValidationError("This shop already exists.")
+        shops.check_name(name)
         return name
 
     def save(self):
-        shop = User(username=self.username, email=f"{self.username}@sheetbase.invalid",
-                    first_name=self.cleaned_data["name"], is_shop=True)
-        shop.set_unusable_password()
-        shop.save()
-        return shop
+        return shops.add(self.cleaned_data["name"])
+
+
+class RenameShopForm(forms.Form):
+    name = forms.CharField(label="New name", max_length=100)
+
+    def __init__(self, *args, shop, **kwargs):
+        super().__init__(*args, initial={"name": str(shop)}, **kwargs)
+        self.shop = shop
+
+    def clean_name(self):
+        name = self.cleaned_data["name"]
+        shops.check_name(name, self.shop)
+        return name
+
+    def save(self):
+        shops.rename(self.shop, self.cleaned_data["name"])
+
+
+class MergeShopForm(forms.Form):
+    into = forms.ModelChoiceField(queryset=User.objects.none(), label="Merge into", empty_label="Pick a shop",
+                                  help_text="The shop its transactions move to.")
+
+    def __init__(self, *args, shop, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.shop = shop
+        self.fields["into"].queryset = User.objects.filter(is_shop=True).exclude(pk=shop.pk)
+
+    def save(self):
+        """Merges; refused (ValidationError, shown on the form) e.g. when the two shops paid each other."""
+        try:
+            return shops.merge(self.shop, self.cleaned_data["into"])
+        except ValidationError as e:
+            self.add_error(None, e)
+            raise

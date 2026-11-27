@@ -10,7 +10,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from sheetapp.forms import DATE_FORMATS
-from sheetapp.models import PlannedTransaction, Transaction, User
+from sheetapp import shops
+from sheetapp.models import PlannedTransaction, Transaction, TransactionCorrection, User
 
 from .check import chain_problems, data_problems
 from .log import entry_hash, hashed_fields
@@ -295,6 +296,22 @@ class ConsistencyTests(AuditTestCase):
         out = StringIO()
         call_command("audit_check", stdout=out)
         self.assertIn("intact and agrees with the data", out.getvalue())
+
+    def test_merging_shops_is_logged_row_by_row(self):
+        with self.captureOnCommitCallbacks(execute=True):
+            lidl, lidel = shops.add("Lidl"), shops.add("Lidel")
+            bought = Transaction.objects.create(amount=Decimal("5.00"), payer=self.jan, recipient=lidl,
+                                                description="x", created_by=self.jan)
+            TransactionCorrection(original=bought, amount=Decimal("5.00"), payer=self.jan, recipient=lidel,
+                                  description="x", date=bought.date, reason="fix", created_by=self.jan).save()
+            Transaction.objects.create(amount=Decimal("3.00"), payer=lidel, recipient=self.ola, description="y",
+                                       created_by=self.jan)
+        self.assertEqual(self.problems(), [])
+        with self.captureOnCommitCallbacks(execute=True):
+            self.client.post(reverse("edit_shop", args=[lidel.pk]), {"into": lidl.pk, "merge": ""})
+        self.assertFalse(User.objects.filter(pk=lidel.pk).exists())
+        self.assertEqual(self.problems(), [])
+        self.assertEqual(len(self.logged(action=Entry.UPDATE, model="sheetapp.transactioncorrection")), 1)
 
     def test_a_change_made_outside_the_app(self):
         self.sql("UPDATE sheetapp_plannedtransaction SET amount = '99.00' WHERE id = %s", self.pizza.pk)

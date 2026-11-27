@@ -134,6 +134,7 @@ body.wide main { max-width: 1100px; }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
         box-shadow: var(--shadow); padding: 1.5rem; }
 .card > :first-child { margin-top: 0; }
+.page-shop .card + .card { margin-top: 1.25rem; }  /* a shop's two forms: Rename, then Merge */
 .card > :last-child { margin-bottom: 0; }
 .card h1 { font-size: 1.4rem; }
 .card h2 { font-size: 1.15rem; margin: 0 0 .25rem; }

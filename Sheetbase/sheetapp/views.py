@@ -21,6 +21,8 @@ from .forms import (
     CorrectionForm,
     EditPlannedForm,
     HistoryFilterForm,
+    MergeShopForm,
+    RenameShopForm,
     ShopForm,
 )
 from .models import (
@@ -35,6 +37,7 @@ from .models import (
     rows_signature,
     save_once,
 )
+from . import shops
 from .payments import PlanChanged, cancel_effects, plan_payment, record_payment
 from .splits import save_split
 from .summary import ZERO, all_time_summary, month_by_month, who_owes_whom, year_summary
@@ -392,6 +395,37 @@ def delete_planned(request, pk):
             return redirect("planned")
     return render(request, "sheetapp/planned_delete.html", {
         "rows": rows, "problems": problems, "signature": rows_signature(rows), "changed": changed})
+
+
+@login_required
+def shop_list(request):
+    return render(request, "sheetapp/shops.html", {"shops": shops.with_counts()})
+
+
+@login_required
+def edit_shop(request, pk):
+    """Rename a shop, or merge it into another one – the only way a shop goes away, so no transaction is lost."""
+    shop = get_object_or_404(User, pk=pk, is_shop=True)
+    data = request.POST if request.method == "POST" else None
+    rename = RenameShopForm(data if data and "rename" in data else None, shop=shop)
+    merge = MergeShopForm(data if data and "merge" in data else None, shop=shop)
+    if rename.is_bound and rename.is_valid():
+        old = str(shop)
+        rename.save()
+        messages.success(request, f"Saved. Renamed {old} to {shop}.")
+        return redirect("shops")
+    if merge.is_bound and merge.is_valid():
+        try:
+            moved = merge.save()
+        except ValidationError:
+            pass  # shown on the form
+        else:
+            into = merge.cleaned_data["into"]
+            messages.success(request, f"Merged {shop} into {into}: {moved} transaction{'s' if moved != 1 else ''} "
+                                      f"moved to {into}, and {shop} deleted.")
+            return redirect("shops")
+    return render(request, "sheetapp/shop_edit.html", {"shop": shop, "rename": rename, "merge": merge,
+                                                        "used": shops.with_counts().get(pk=shop.pk).transactions})
 
 
 @login_required
