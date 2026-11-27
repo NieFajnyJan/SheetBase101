@@ -4,13 +4,14 @@ Done transactions only, with their corrected values; cancelled ones don't count.
 from dataclasses import dataclass, field
 from decimal import Decimal, ROUND_HALF_UP
 
-from django.db.models import Max, Min, Sum
-from django.db.models.functions import ExtractMonth
+from django.db.models import Case, DecimalField, Exists, F, Max, OuterRef, Q, Subquery, Sum, Value, When
+from django.db.models.functions import Coalesce, ExtractMonth
 from django.utils import timezone
 
 from .models import Transaction, User
 
 ZERO = Decimal("0.00")
+AMOUNT = DecimalField(max_digits=12, decimal_places=2)
 # In English whatever language the server runs in (strftime("%B") would follow it).
 MONTH_NAMES = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October",
                "November", "December"]
@@ -76,44 +77,55 @@ def complete_months(start, end):
     return max(months, 0)
 
 
+def with_kinds(transactions):
+    """The done transactions that count (not cancelled), each with whether its payer and its recipient
+    (as they are now) are shops – which makes it a purchase, a return, or a payment between members."""
+    def is_shop(side):
+        return Exists(User.objects.filter(pk=OuterRef(side), is_shop=True))
+
+    return transactions.filter(cur_cancelled=False).annotate(payer_shop=is_shop("cur_payer"),
+                                                             recipient_shop=is_shop("cur_recipient"))
+
+
 def summarise(transactions, year=None, count_months=False):
-    users = {u.pk: u for u in User.objects.all()}
-    members = {pk: MemberRow(u) for pk, u in users.items() if not u.is_shop}
-    shops = {pk: ShopRow(u) for pk, u in users.items() if u.is_shop}
-    summary = Summary(year)
-    latest = None  # date of the latest transaction in the period
+    done = with_kinds(transactions)
 
-    # One database query: amounts summed per (payer, recipient) pair, with the pair's first date.
-    pairs = (transactions.filter(cur_cancelled=False).order_by().values("cur_payer", "cur_recipient")
-             .annotate(amount=Sum("cur_amount"), first=Min("cur_date"), last=Max("cur_date")))
-    for pair in pairs:
-        # SQLite sums decimals with a long tail (192.1000000000000) – round to whole grosze.
-        amount = pair["amount"].quantize(ZERO)
-        payer, recipient = pair["cur_payer"], pair["cur_recipient"]
-        summary.total += amount
-        latest = max(latest or pair["last"], pair["last"])
-        if payer in members and recipient in shops:
-            members[payer].purchases += amount
-            shops[recipient].sold += amount
-        elif payer in shops and recipient in members:
-            members[recipient].returns += amount
-            shops[payer].returned += amount
-        elif payer in members and recipient in members:
-            members[payer].paid += amount
-            members[recipient].received += amount
-        elif payer in shops and recipient in shops:
-            summary.between_shops += amount
-        for pk in (payer, recipient):
-            if pk in members and (members[pk].first_date is None or pair["first"] < members[pk].first_date):
-                members[pk].first_date = pair["first"]
+    def total(side, **kind):
+        """What everyone moved on `side` ("cur_payer": paid, "cur_recipient": received) of `kind`."""
+        per_user = (done.filter(**{side: OuterRef("pk")}, **kind).order_by().values(side)
+                    .annotate(amount=Sum("cur_amount")).values("amount"))
+        return Coalesce(Subquery(per_user), Value(ZERO), output_field=AMOUNT)
 
-    if count_months:
-        for row in members.values():
-            if row.first_date:
-                row.months = complete_months(row.first_date, latest)
+    # One query, a row per user. A member's “paid” and “received” are with other members; a shop's are
+    # what it paid back (returned) and what members paid it (sold).
+    users = User.objects.annotate(
+        purchases=total("cur_payer", recipient_shop=True),
+        returns=total("cur_recipient", payer_shop=True),
+        paid=total("cur_payer", recipient_shop=False),
+        received=total("cur_recipient", payer_shop=False),
+        first=Subquery(done.filter(Q(cur_payer=OuterRef("pk")) | Q(cur_recipient=OuterRef("pk")))
+                       .order_by("cur_date").values("cur_date")[:1]),
+    )
+    # And one for the whole period.
+    period = done.aggregate(
+        total=Sum("cur_amount", default=ZERO), latest=Max("cur_date"),
+        between_shops=Sum("cur_amount", filter=Q(payer_shop=True, recipient_shop=True), default=ZERO))
 
-    summary.rows = list(members.values())  # User ordering: by name
-    summary.shop_rows = [r for r in shops.values() if r.sold or r.returned]
+    # SQLite sums decimals with a long tail (192.1000000000000) – round to whole grosze.
+    summary = Summary(year, total=period["total"].quantize(ZERO),
+                      between_shops=period["between_shops"].quantize(ZERO))
+    for user in users:  # User ordering: by name
+        if user.is_shop:
+            if user.received or user.paid:
+                summary.shop_rows.append(ShopRow(user, sold=user.received.quantize(ZERO),
+                                                 returned=user.paid.quantize(ZERO)))
+            continue
+        row = MemberRow(user, purchases=user.purchases.quantize(ZERO), returns=user.returns.quantize(ZERO),
+                        paid=user.paid.quantize(ZERO), received=user.received.quantize(ZERO),
+                        first_date=user.first)
+        if count_months and row.first_date:
+            row.months = complete_months(row.first_date, period["latest"])
+        summary.rows.append(row)
     for column in ("purchases", "returns", "paid", "received"):
         setattr(summary, column, sum((getattr(r, column) for r in summary.rows), ZERO))
     return summary
@@ -122,18 +134,13 @@ def summarise(transactions, year=None, count_months=False):
 def monthly_spent(year):
     """What members spent on shops in each month of `year` – purchases minus returns, as Total spent
     overall (payments between members cancel out): 12 amounts, January first."""
-    spent = [ZERO] * 12
-    rows = (Transaction.objects.with_current().filter(cur_date__year=year, cur_cancelled=False).order_by()
-            .annotate(month=ExtractMonth("cur_date")).values("month", "cur_payer", "cur_recipient")
-            .annotate(amount=Sum("cur_amount")))
-    shops = set(User.objects.filter(is_shop=True).values_list("pk", flat=True))
-    for row in rows:
-        payer_shop, recipient_shop = row["cur_payer"] in shops, row["cur_recipient"] in shops
-        if recipient_shop and not payer_shop:
-            spent[row["month"] - 1] += row["amount"].quantize(ZERO)
-        elif payer_shop and not recipient_shop:
-            spent[row["month"] - 1] -= row["amount"].quantize(ZERO)
-    return spent
+    spent = Case(When(payer_shop=False, recipient_shop=True, then=F("cur_amount")),
+                 When(payer_shop=True, recipient_shop=False, then=-F("cur_amount")),
+                 default=Value(ZERO), output_field=AMOUNT)
+    months = (with_kinds(Transaction.objects.with_current().filter(cur_date__year=year)).order_by()
+              .annotate(month=ExtractMonth("cur_date")).values("month").annotate(spent=Sum(spent)))
+    by_month = {row["month"]: row["spent"].quantize(ZERO) for row in months}
+    return [by_month.get(m, ZERO) for m in range(1, 13)]
 
 
 def month_by_month(this_year):

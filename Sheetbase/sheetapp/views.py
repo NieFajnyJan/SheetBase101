@@ -1,5 +1,4 @@
 import uuid
-from decimal import Decimal
 from functools import wraps
 
 from django.contrib import messages
@@ -30,6 +29,7 @@ from .models import (
     PlannedTransaction,
     Transaction,
     TransactionCorrection,
+    User,
     changed_rows,
     needs_matching,
     rows_signature,
@@ -37,7 +37,7 @@ from .models import (
 )
 from .payments import PlanChanged, cancel_effects, plan_payment, record_payment
 from .splits import save_split
-from .summary import all_time_summary, month_by_month, year_summary
+from .summary import ZERO, all_time_summary, month_by_month, year_summary
 
 
 class DebtGone(Exception):
@@ -360,22 +360,20 @@ def planned(request):
         "form_open": request.method == "POST",  # sent but not saved: an error, or Back from the shares
         "debts": debts,
         "total": debts.aggregate(t=Sum("amount"))["t"] or 0,
-        "owed_to_me": balances(debts, request.user, "creditor"),
-        "i_owe": balances(debts, request.user, "debtor"),
+        "owed_to_me": balances(request.user, "creditor"),
+        "i_owe": balances(request.user, "debtor"),
     })
 
 
-def balances(debts, user, side):
+def balances(user, side):
     """The open debts where `user` is on `side` ("creditor": owed to them, "debtor": they owe), added up
-    per other person: ([(person, amount), ...] by name, total)."""
-    other = "debtor" if side == "creditor" else "creditor"
-    per_person = {}
-    for debt in debts:
-        if getattr(debt, f"{side}_id") == user.pk:
-            person = getattr(debt, other)
-            per_person[person] = per_person.get(person, 0) + debt.amount
-    rows = sorted(per_person.items(), key=lambda row: str(row[0]).lower())
-    return rows, sum((amount for _, amount in rows), Decimal("0.00"))
+    per other person in one query: ([(person, amount), ...] by name, total)."""
+    other = "debts" if side == "creditor" else "credits"  # what the people on the other side owe / are owed
+    people = (User.objects.filter(**{f"{other}__{side}": user, f"{other}__settled_by__isnull": True})
+              .annotate(amount=Sum(f"{other}__amount")))
+    # SQLite sums decimals with a long tail – round to whole grosze.
+    rows = sorted(((person, person.amount.quantize(ZERO)) for person in people), key=lambda row: str(row[0]).lower())
+    return rows, sum((amount for _, amount in rows), ZERO)
 
 
 def open_debt(request, pk, nothing_done="Nothing was saved."):
