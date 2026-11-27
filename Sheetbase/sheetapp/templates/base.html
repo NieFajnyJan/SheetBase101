@@ -1,5 +1,6 @@
 {% load static %}<!doctype html>
-<html lang="en">
+{# The look each browser chose with the small switch in the bottom right corner: the brutalist one adds class="brutal" (see app.css). #}
+<html lang="en"{% if request.COOKIES.look == "brutalist" %} class="brutal"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -7,7 +8,7 @@
   {# All the styling is in one stylesheet; pages add nothing of their own. #}
   <link rel="stylesheet" href="{% static 'sheetapp/app.css' %}">
   <link rel="icon" href="{% static 'sheetapp/favicon.svg' %}" type="image/svg+xml">
-  <meta name="theme-color" content="#0f172a">
+  <meta name="theme-color" content="{% if request.COOKIES.look == "brutalist" %}#000000{% else %}#0f172a{% endif %}">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -21,6 +22,7 @@
           <li><a href="{% url 'transactions' %}"{% if page == "transactions" or page == "correct_transaction" or page == "cancel_transaction" %} aria-current="page"{% endif %}>Transactions</a></li>
           <li><a href="{% url 'planned' %}"{% if page == "planned" or page == "edit_planned" or page == "delete_planned" %} aria-current="page"{% endif %}>Debts</a></li>
           <li><a href="{% url 'summary' %}"{% if page == "summary" %} aria-current="page"{% endif %}>Summary</a></li>
+          {% if request.COOKIES.look == "brutalist" %}<li><a href="{% url 'game' %}"{% if page == "game" %} aria-current="page"{% endif %}>Game</a></li>{% endif %}
           {% if user.is_staff %}<li><a href="{% url 'admin:index' %}">Admin</a></li>{% endif %}
         </ul>
       </nav>
@@ -31,7 +33,9 @@
         <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Log out</button></form>
       </div>
     {% else %}
-      <a href="{% url 'login' %}">Log in</a>
+      <div class="account">
+        <a href="{% url 'login' %}">Log in</a>
+      </div>
     {% endif %}
    </div>
   </header>
@@ -40,6 +44,7 @@
     {% if messages %}<div class="messages">{% for message in messages %}<p class="msg msg-{{ message.level_tag }}" role="{% if message.level_tag == "warning" or message.level_tag == "error" %}alert{% else %}status{% endif %}">{{ message }}</p>{% endfor %}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% include "sheetapp/_look_switch.html" %}
   <script>
     // A second click while a form is still being sent would send it again: ignore it until the next page.
     // (The server refuses an add sent twice anyway; this just shows the first click is on its way.)

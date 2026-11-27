@@ -17,4 +17,6 @@ urlpatterns = [
     path("planned/<int:pk>/edit/", views.edit_planned, name="edit_planned"),
     path("planned/<int:pk>/delete/", views.delete_planned, name="delete_planned"),
     path("summary/", views.summary, name="summary"),
+    path("look/", views.set_look, name="set_look"),
+    path("game/", views.game, name="game"),
 ]

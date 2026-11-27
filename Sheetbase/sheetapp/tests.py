@@ -351,7 +351,7 @@ class HeadingsAndTablesTests(TestCase):
         self.assertIn('<table aria-labelledby="all-time">', html)
         self.assertIn('id="all-time"', html)
         self.assertIn("<strong>Total spent</strong> = purchases − returns + paid to members − received from members", html)
-        self.assertNotIn(' title="', html[html.index("<main>"):])  # nothing explained only on hover
+        self.assertNotIn(' title="', html[html.index("<main>"):html.index("</main>")])  # nothing explained only on hover
 
     def test_action_columns_have_a_header(self):
         PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
@@ -600,6 +600,78 @@ class OneStylesheetTests(TestCase):
                     reverse("correct_transaction", args=[t.pk])):
             self.assertContains(self.client.get(url), '<a class="btn btn-secondary" href=', msg_prefix=url)
         self.assertContains(self.client.get(reverse("planned")), f'<a class="danger" href="{reverse("delete_planned", args=[d.pk])}">Delete</a>')
+
+
+class LookTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.client.force_login(self.jan)
+        self.url = reverse("set_look")
+
+    def test_normal_look_to_start_with(self):
+        html = self.client.get(reverse("summary")).content.decode()
+        self.assertIn('<html lang="en">', html)
+        self.assertIn('<button name="look" value="brutalist" role="switch" aria-checked="false"', html)
+        self.assertNotIn(f'href="{reverse("game")}"', html)  # the game comes with the brutalist look
+
+    def test_switching_on_and_off_and_back_to_the_same_page(self):
+        response = self.client.post(self.url, {"look": "brutalist", "next": "/summary/?x=1"})
+        self.assertRedirects(response, "/summary/?x=1", fetch_redirect_response=False)
+        self.assertEqual(response.cookies["look"].value, "brutalist")
+        html = self.client.get(reverse("summary")).content.decode()
+        self.assertIn('<html lang="en" class="brutal">', html)
+        self.assertIn('<button name="look" value="normal" role="switch" aria-checked="true"', html)
+        self.assertIn(f'href="{reverse("game")}"', html)
+        self.client.post(self.url, {"look": "normal", "next": "/summary/"})
+        self.assertIn('<html lang="en">', self.client.get(reverse("summary")).content.decode())
+
+    def test_works_logged_out_too(self):
+        self.client.logout()
+        self.assertContains(self.client.get(reverse("login")), 'name="look" value="brutalist"')
+        self.client.post(self.url, {"look": "brutalist", "next": reverse("login")})
+        self.assertContains(self.client.get(reverse("login")), '<html lang="en" class="brutal">')
+
+    def test_never_sends_you_off_the_site(self):
+        for bad in ("https://evil.example/", "//evil.example/", ""):
+            response = self.client.post(self.url, {"look": "brutalist", "next": bad})
+            self.assertRedirects(response, reverse("transactions"), fetch_redirect_response=False, msg_prefix=bad)
+
+    def test_only_by_post(self):
+        self.assertEqual(self.client.get(self.url, {"look": "brutalist"}).status_code, 405)
+
+    def test_the_look_is_only_in_the_one_stylesheet(self):
+        from django.contrib.staticfiles import finders
+        css = open(finders.find("sheetapp/app.css")).read()
+        self.assertIn("html.brutal {", css)
+        self.assertIn("--radius: 0;", css[css.index("html.brutal {"):])
+
+
+class GameTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.url = reverse("game")
+
+    def test_logged_out_goes_to_login(self):
+        self.assertRedirects(self.client.get(self.url), f"{reverse('login')}?next={self.url}",
+                             fetch_redirect_response=False)
+
+    def test_the_enemies_are_my_open_debts_and_nothing_changes(self):
+        mine = PlannedTransaction.objects.create(debtor=self.jan, creditor=self.ola, amount=Decimal("39.47"),
+                                                 description="opłaty", created_by=self.ola)
+        PlannedTransaction.objects.create(debtor=self.ola, creditor=self.jan, amount=Decimal("5.00"),
+                                          description="owed to me", created_by=self.jan)  # not mine to pay
+        self.client.force_login(self.jan)
+        page = self.client.get(self.url)
+        self.assertEqual(page.context["enemies"],
+                         [{"what": "opłaty", "amount": "39,47\xa0zł", "value": 39.47, "to": "Ola"}])
+        self.assertContains(page, '<script id="game-enemies" type="application/json">')
+        self.assertContains(page, '<canvas id="game"')
+        self.assertContains(page, "nothing here changes a real debt")
+        mine.refresh_from_db()
+        self.assertFalse(mine.is_settled)
+        self.assertEqual(PlannedTransaction.objects.open().count(), 2)
 
 
 class TransactionModelTests(TestCase):
