@@ -21,6 +21,7 @@ from audit.models import Entry
 
 from .models import (
     SHOP_USERNAME,
+    CORRECTABLE_FIELDS,
     AlreadyAdded,
     PlannedTransaction,
     Transaction,
@@ -30,9 +31,10 @@ from .models import (
     save_once,
     validate_transaction_date,
 )
+from . import shops
 from .payments import plan_payment, record_payment
 from .splits import divide, plan_split
-from .summary import complete_months
+from .summary import all_time_summary, complete_months
 from .templatetags.money import zl
 
 
@@ -600,6 +602,109 @@ class OneStylesheetTests(TestCase):
                     reverse("correct_transaction", args=[t.pk])):
             self.assertContains(self.client.get(url), '<a class="btn btn-secondary" href=', msg_prefix=url)
         self.assertContains(self.client.get(reverse("planned")), f'<a class="danger" href="{reverse("delete_planned", args=[d.pk])}">Delete</a>')
+
+
+class ShopTests(TestCase):
+    def setUp(self):
+        self.jan = User.objects.create_user("jan", "jan@example.com", first_name="Jan")
+        self.ola = User.objects.create_user("ola", "ola@example.com", first_name="Ola")
+        self.lidl = shops.add("Lidl")
+        self.lidel = shops.add("Lidel")  # the typo
+        self.client.force_login(self.jan)
+
+    def paid(self, payer, recipient, amount="10.00", description="x"):
+        return Transaction.objects.create(amount=Decimal(amount), payer=payer, recipient=recipient,
+                                          description=description, created_by=self.jan)
+
+    def correct(self, original, **changes):
+        current = original.current
+        values = {f: getattr(current, f) for f in CORRECTABLE_FIELDS}
+        TransactionCorrection(original=original, reason="fix", created_by=self.jan, **{**values, **changes}).save()
+
+    def test_listed_with_how_many_transactions_they_are_in(self):
+        self.paid(self.jan, self.lidl)
+        self.paid(self.lidl, self.ola)  # a return
+        self.correct(self.paid(self.jan, self.lidel), recipient=self.lidl)  # now Lidl's
+        page = self.client.get(reverse("shops"))
+        self.assertEqual([(str(s), s.transactions) for s in page.context["shops"]], [("Lidel", 0), ("Lidl", 3), ("Shop", 0)])  # Shop: from a migration
+        self.assertNotContains(page, "Ola")  # members aren't shops
+        self.assertContains(page, f'href="{reverse("edit_shop", args=[self.lidl.pk])}"')
+        self.assertContains(self.client.get(reverse("transactions")), f'href="{reverse("shops")}"')  # in the menu
+
+    def test_only_shops_and_only_logged_in(self):
+        self.assertEqual(self.client.get(reverse("edit_shop", args=[self.ola.pk])).status_code, 404)
+        self.client.logout()
+        self.assertRedirects(self.client.get(reverse("shops")), f"{reverse('login')}?next={reverse('shops')}",
+                             fetch_redirect_response=False)
+
+    def test_rename(self):
+        t = self.paid(self.jan, self.lidel)
+        response = self.client.post(reverse("edit_shop", args=[self.lidel.pk]), {"name": "Biedronka", "rename": ""})
+        self.assertRedirects(response, reverse("shops"))
+        self.lidel.refresh_from_db()
+        self.assertEqual((str(self.lidel), self.lidel.username, self.lidel.email),
+                         ("Biedronka", "shop-biedronka", "shop-biedronka@sheetbase.invalid"))
+        self.assertEqual(Transaction.objects.get(pk=t.pk).recipient, self.lidel)  # its transactions follow
+        # The old name is free again.
+        self.assertEqual(str(shops.add("Lidel")), "Lidel")
+
+    def test_rename_to_its_own_name_with_other_capitals(self):
+        self.client.post(reverse("edit_shop", args=[self.lidl.pk]), {"name": "LIDL", "rename": ""})
+        self.lidl.refresh_from_db()
+        self.assertEqual(str(self.lidl), "LIDL")
+
+    def test_rename_refused(self):
+        url = reverse("edit_shop", args=[self.lidel.pk])
+        for name, error in (("lidl", "This shop already exists."), ("!!", "Enter a name with letters or digits."),
+                            ("", "This field is required.")):
+            response = self.client.post(url, {"name": name, "rename": ""})
+            self.assertContains(response, error, msg_prefix=name)
+        self.lidel.refresh_from_db()
+        self.assertEqual(str(self.lidel), "Lidel")
+
+    def test_merge_moves_every_version_and_deletes_the_shop(self):
+        bought = self.paid(self.jan, self.lidel, "12.00")
+        returned = self.paid(self.lidel, self.ola, "2.00")
+        fixed = self.paid(self.jan, self.lidl, "5.00")
+        self.correct(fixed, recipient=self.lidel)  # its correction names Lidel, its original Lidl
+        before = (all_time_summary().total, all_time_summary().purchases, all_time_summary().returns)
+        response = self.client.post(reverse("edit_shop", args=[self.lidel.pk]), {"into": self.lidl.pk, "merge": ""},
+                                    follow=True)
+        self.assertRedirects(response, reverse("shops"))
+        self.assertContains(response, "Merged Lidel into Lidl: 3 transactions moved to Lidl, and Lidel deleted.")
+        self.assertFalse(User.objects.filter(pk=self.lidel.pk).exists())
+        for t in (bought, returned, fixed):
+            t = Transaction.objects.get(pk=t.pk)
+            self.assertNotIn(self.lidel.pk, {v.payer_id for v in t.versions} | {v.recipient_id for v in t.versions})
+        self.assertEqual(Transaction.objects.get(pk=bought.pk).recipient, self.lidl)
+        self.assertEqual(Transaction.objects.get(pk=returned.pk).payer, self.lidl)
+        self.assertEqual(Transaction.objects.count(), 3)  # none lost
+        self.assertEqual((all_time_summary().total, all_time_summary().purchases, all_time_summary().returns), before)
+        self.assertEqual([(str(r.shop), r.sold, r.returned) for r in all_time_summary().shop_rows],
+                         [("Lidl", Decimal("17.00"), Decimal("2.00"))])
+
+    def test_merge_refused_when_they_paid_each_other(self):
+        self.paid(self.lidel, self.lidl)  # recorded before payments between shops were refused
+        response = self.client.post(reverse("edit_shop", args=[self.lidel.pk]), {"into": self.lidl.pk, "merge": ""})
+        self.assertContains(response, "Lidel and Lidl paid each other, so they can&#x27;t be merged")
+        self.assertTrue(User.objects.filter(pk=self.lidel.pk).exists())
+
+    def test_merge_only_into_another_shop(self):
+        url = reverse("edit_shop", args=[self.lidel.pk])
+        for into in (self.lidel.pk, self.ola.pk, ""):
+            self.assertEqual(self.client.post(url, {"into": into, "merge": ""}).status_code, 200, msg=into)
+        self.assertTrue(User.objects.filter(pk=self.lidel.pk).exists())
+        with self.assertRaises(ValidationError):
+            shops.merge(self.lidel, self.lidel)
+
+    def test_nothing_to_merge_into(self):
+        User.objects.filter(is_shop=True).exclude(pk=self.lidel.pk).delete()
+        self.assertContains(self.client.get(reverse("edit_shop", args=[self.lidel.pk])),
+                            "There's no other shop to merge it into.")
+
+    def test_looking_changes_nothing(self):
+        self.client.get(reverse("edit_shop", args=[self.lidel.pk]), {"into": self.lidl.pk, "merge": ""})
+        self.assertTrue(User.objects.filter(pk=self.lidel.pk).exists())
 
 
 class LookTests(TestCase):

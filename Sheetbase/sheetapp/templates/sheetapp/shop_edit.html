@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+
+{% block body_class %}page-edit page-shop{% endblock %}
+{% block title %}{{ shop }} · Shops · SheetBase{% endblock %}
+
+{% block content %}
+  <h1>{{ shop }}</h1>
+  <p class="muted">In {{ used }} transaction{{ used|pluralize }}.</p>
+
+  <form class="card" method="post">
+    {% csrf_token %}
+    <h2>Rename</h2>
+    <p class="muted">Its transactions show the new name.</p>
+    {{ rename.as_p }}
+    <div class="actions">
+      <button class="btn" name="rename">Rename</button>
+      <a class="btn btn-secondary" href="{% url 'shops' %}">Back</a>
+    </div>
+  </form>
+
+  <form class="card" method="post">
+    {% csrf_token %}
+    <h2>Merge into another shop</h2>
+    {% if merge.fields.into.queryset.exists %}
+      <p>All its transactions move to the shop you pick, and <strong>{{ shop }} is deleted</strong>.
+        Totals stay the same. This can't be undone.</p>
+      {{ merge.as_p }}
+      <div class="actions">
+        <button class="btn btn-danger" name="merge">Merge and delete {{ shop }}</button>
+      </div>
+    {% else %}
+      <p class="muted">There's no other shop to merge it into.</p>
+    {% endif %}
+  </form>
+{% endblock %}

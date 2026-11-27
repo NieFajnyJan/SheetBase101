@@ -22,6 +22,7 @@
           <li><a href="{% url 'transactions' %}"{% if page == "transactions" or page == "correct_transaction" or page == "cancel_transaction" %} aria-current="page"{% endif %}>Transactions</a></li>
           <li><a href="{% url 'planned' %}"{% if page == "planned" or page == "edit_planned" or page == "delete_planned" %} aria-current="page"{% endif %}>Debts</a></li>
           <li><a href="{% url 'summary' %}"{% if page == "summary" %} aria-current="page"{% endif %}>Summary</a></li>
+          <li><a href="{% url 'shops' %}"{% if page == "shops" or page == "edit_shop" %} aria-current="page"{% endif %}>Shops</a></li>
           {% if request.COOKIES.look == "brutalist" %}<li><a href="{% url 'game' %}"{% if page == "game" %} aria-current="page"{% endif %}>Game</a></li>{% endif %}
           {% if user.is_staff %}<li><a href="{% url 'admin:index' %}">Admin</a></li>{% endif %}
         </ul>

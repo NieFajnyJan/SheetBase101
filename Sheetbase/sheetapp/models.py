@@ -260,6 +260,9 @@ class TransactionCorrection(models.Model):
     # original, so of two corrections of the same version sent at the same moment only the first is saved.
     version = models.PositiveIntegerField(editable=False)
 
+    # Never changed one by one; only merging shops moves them all to another shop – logged row by row.
+    objects = AuditedQuerySet.as_manager()
+
     class Meta:
         ordering = ["-created_at", "-pk"]
         constraints = [
