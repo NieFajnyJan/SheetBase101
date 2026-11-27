@@ -107,6 +107,21 @@ code { font-size: .9em; background: var(--surface-2); padding: .1em .35em; borde
   .site-header .user { max-width: 10ch; }
 }
 
+/* The look switch: small and quiet in the bottom right corner, there for whoever looks for it. */
+.look-switch { position: fixed; right: .4rem; bottom: .4rem; z-index: 50; margin: 0; }
+.look-switch button {
+  display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .3rem; border: 0; background: none;
+  font: inherit; font-size: .7rem; color: var(--muted); cursor: pointer; opacity: .5; transition: opacity var(--ease);
+}
+.look-switch button:hover, .look-switch button:focus-visible { opacity: 1; }
+/* The track, with its knob on the left (off) or the right (on). */
+.look-switch button::before {
+  content: ""; flex: none; width: 1.6rem; height: .9rem; border-radius: 999px; background-color: var(--field-border);
+  background-image: radial-gradient(circle, #fff 0 .3rem, transparent .32rem);
+  background-size: .9rem .9rem; background-repeat: no-repeat; background-position: left center;
+}
+.look-switch button[aria-checked="true"]::before { background-color: var(--accent); background-position: right center; }
+
 /* ---------- Layout ---------- */
 main { max-width: 520px; margin: 2rem auto 3rem; padding: 0 1rem; }
 body.wide main { max-width: 1100px; }
@@ -344,11 +359,194 @@ tr.history > td { background: var(--surface-hover); white-space: normal; }
 .page-summary tr > :first-child { position: sticky; left: 0; z-index: 1; }
 .page-summary tbody tr > :first-child { background: var(--surface); }
 
+/* ---------- The brutalist look (html.brutal, switched on in the header) ----------
+   Raw board-marked concrete, nearly black; razor-sharp edges (no rounding anywhere), thick hard borders,
+   hard offset shadows instead of soft ones, heavy condensed capitals, a hazard yellow for focus and a
+   signal red. Texts keep at least 4.5:1 on every concrete surface. Everything above still applies;
+   this only overrides it, so the normal look is untouched. */
+html.brutal {
+  --bg: #0c0c0b;
+  --surface: #1b1b19;
+  --surface-2: #262623;
+  --surface-hover: #2f2f2b;
+  --border: #4d4c47;
+  --field-border: #8f8d85;
+  --text: #ecebe4;
+  --muted: #aeaba1;           /* 7:1 on --surface, 6:1 on --surface-2 */
+  --brand: #ecebe4;
+  --brand-hover: #ffffff;
+  --brand-soft: #33332f;
+  --accent: #ff3b1f;          /* signal red: edges, the page you're on */
+  --accent-text: #ff7a63;     /* links: 6:1 on --surface */
+  --accent-soft: #2b1410;
+  --focus: #ffd400;           /* hazard yellow */
+  --income: #8fe36b;
+  --expense: #ff6a55;
+  --danger: #ff5a45;
+  --danger-hover: #ff7a68;
+  --danger-soft: #3a1510;
+  --success: #8fe36b;
+  --success-soft: #16240f;
+  --warning: #ffb52e;
+  --warning-edge: #ff9500;
+  --warning-soft: #33260a;
+  --info: #7ab4ff;
+  --info-soft: #10203a;
+  --highlight: #4a3f00;
+
+  --radius: 0;
+  --radius-sm: 0;
+  --shadow: 6px 6px 0 #000;
+  --shadow-lg: 10px 10px 0 #000;
+  --ease: 0ms linear;         /* no softening: things snap */
+
+  /* Concrete: fine aggregate (noise), large stains (low noise), the marks of the formwork boards
+     and the holes the form ties leave. All drawn, no image files. */
+  --grit: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='220' height='220'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .55 0 0 0 0 .55 0 0 0 0 .53 0 0 0 .5 -.12'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)'/%3E%3C/svg%3E");
+  --stains: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='900' height='700'%3E%3Cfilter id='s'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.006 .012' numOctaves='4' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 -1.6 1.05'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23s)'/%3E%3C/svg%3E");
+  --boards: repeating-linear-gradient(180deg, transparent 0 58px, rgb(0 0 0 / .55) 58px 60px, rgb(255 255 255 / .035) 60px 61px);
+  --ties: radial-gradient(circle at 50% 50%, #000 0 3px, rgb(0 0 0 / .5) 4px, transparent 6px);
+  --concrete: var(--grit), var(--stains), var(--boards), var(--ties);
+  color-scheme: dark;
+}
+html.brutal body {
+  background-color: var(--bg);
+  background-image: var(--concrete);
+  background-size: 220px 220px, 900px 700px, auto, 240px 240px;
+  background-attachment: fixed;
+  font-family: ui-monospace, "JetBrains Mono", "DejaVu Sans Mono", Menlo, Consolas, monospace;
+  font-size: 15px;
+  -webkit-font-smoothing: auto;
+}
+html.brutal h1, html.brutal h2, html.brutal h3, html.brutal .section-title, html.brutal .btn,
+html.brutal .site-header .brand, html.brutal thead th, html.brutal .adder > summary {
+  /* Impact where it's installed (it has one weight: never thickened further); elsewhere the heaviest
+     narrow face there is, at its boldest. */
+  font-family: Impact, Haettenschweiler, "Arial Narrow", "Nimbus Sans Narrow", "Roboto Condensed",
+               "Liberation Sans Narrow", "Arial Black", sans-serif;
+  font-weight: 900; font-synthesis: none; text-transform: uppercase; letter-spacing: .03em;
+}
+html.brutal h1 { font-size: 2.6rem; line-height: 1; }
+html.brutal h2, html.brutal .section-title { font-size: 1.9rem; line-height: 1; }
+html.brutal h3 { font-size: 1.3rem; }
+html.brutal a { text-decoration-thickness: 2px; }
+html.brutal a:hover { color: #000; background: var(--focus); text-decoration: none; }
+html.brutal :focus-visible { outline: 4px solid var(--focus); outline-offset: 0; }
+html.brutal ::selection { background: var(--accent); color: #000; }
+html.brutal code { border-radius: 0; }
+
+/* Slabs: every box is a cast block with a thick edge and a hard shadow. */
+html.brutal .card, html.brutal .table-wrap, html.brutal .period, html.brutal .add-shop, html.brutal .split,
+html.brutal .panel, html.brutal .msg, html.brutal .blocked {
+  border: 3px solid #000; border-radius: 0; box-shadow: var(--shadow);
+  background-color: var(--surface); background-image: var(--grit), var(--stains);
+  background-size: 220px 220px, 900px 700px;
+}
+html.brutal .panel, html.brutal .add-shop, html.brutal .split { background-color: var(--surface-2); box-shadow: none; }
+html.brutal .msg, html.brutal .blocked { border-left-width: 14px; }
+html.brutal .msg { border-left-color: var(--accent); background-color: var(--success-soft); }
+html.brutal .msg-info { border-left-color: var(--info); background-color: var(--info-soft); }
+html.brutal .msg-warning { border-left-color: var(--warning-edge); background-color: var(--warning-soft); }
+html.brutal .msg-error { border-left-color: var(--danger); background-color: var(--danger-soft); }
+
+/* Header: a black lintel with a red edge. */
+html.brutal .site-header { background: #000 var(--grit); border-bottom: 5px solid var(--accent); box-shadow: 0 6px 0 #000; }
+html.brutal .site-header .brand { font-size: 1.6rem; letter-spacing: .08em; }
+html.brutal .site-header nav a, html.brutal .site-header .user { border-radius: 0; text-transform: uppercase; font-weight: 700; }
+html.brutal .site-header nav a:hover, html.brutal .site-header .user:hover { background: var(--text); color: #000; }
+html.brutal .site-header nav a[aria-current="page"] { background: var(--accent); color: #000; box-shadow: none; }
+html.brutal .site-header button { border: 2px solid var(--text); border-radius: 0; text-transform: uppercase; font-weight: 700; }
+html.brutal .site-header button:hover { background: var(--text); color: #000; }
+html.brutal .site-header a:focus-visible, html.brutal .site-header button:focus-visible { outline-color: var(--focus); }
+html.brutal .look-switch button { text-transform: uppercase; font-weight: 700; }
+html.brutal .look-switch button::before {
+  border-radius: 0; border: 2px solid #000; background-color: var(--surface-2);
+  background-image: linear-gradient(var(--text), var(--text)); background-size: .5rem .5rem;
+}
+html.brutal .look-switch button[aria-checked="true"]::before { background-color: var(--accent); background-image: linear-gradient(#000, #000); }
+
+/* Buttons: blocks that are pushed in when pressed. */
+html.brutal .btn {
+  background: var(--text); color: #000; border: 3px solid #000; border-radius: 0;
+  box-shadow: 4px 4px 0 #000; font-size: 1.15rem; padding: .5rem 1.4rem;
+}
+html.brutal .btn:hover { background: var(--focus); border-color: #000; color: #000; box-shadow: 4px 4px 0 #000; }
+html.brutal .btn:active { transform: translate(4px, 4px); box-shadow: none; }
+html.brutal .btn-secondary, html.brutal .adder[open] > summary { background: var(--surface-2); color: var(--text); border-color: var(--text); }
+html.brutal .btn-danger { background: var(--danger); color: #000; }
+html.brutal .btn-danger:hover { background: #ff2200; }
+html.brutal .btn-social { background: var(--surface-2); color: var(--text); border-color: var(--text); }
+
+/* Fields: hollows cast into the slab. */
+html.brutal input[type=text], html.brutal input[type=email], html.brutal input[type=password], html.brutal input[type=date],
+html.brutal input[type=number], html.brutal select, html.brutal textarea {
+  background-color: #070707; color: var(--text); border: 2px solid var(--field-border); border-radius: 0;
+  box-shadow: inset 3px 3px 0 #000;
+}
+html.brutal input:hover, html.brutal select:hover, html.brutal textarea:hover { border-color: var(--text); }
+html.brutal input:focus-visible, html.brutal select:focus-visible, html.brutal textarea:focus-visible { border-color: var(--focus); }
+html.brutal select:not([multiple]) {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23ecebe4' stroke-width='3' stroke-linecap='square'%3E%3Cpath d='M5 9l7 7 7-7'/%3E%3C/svg%3E");
+}
+html.brutal input:disabled, html.brutal select:disabled { background-color: var(--surface-2); color: var(--muted); }
+html.brutal input[type=checkbox], html.brutal input[type=radio] { accent-color: var(--accent); width: 1.2rem; height: 1.2rem; }
+html.brutal .date-pick { background: var(--surface-2); color: var(--text); border: 2px solid var(--text); border-radius: 0; }
+html.brutal .date-pick:hover { background: var(--focus); color: #000; }
+
+/* Tables: a grid of black joints. */
+html.brutal table { border-collapse: collapse; }
+html.brutal th, html.brutal td { border-bottom: 1px solid #000; }
+html.brutal thead th { background: #000; color: var(--text); font-size: .95rem; letter-spacing: .06em; }
+/* Monospace is wider: tables a size smaller, so the lists still fit a laptop. */
+html.brutal table { font-size: .82rem; }
+html.brutal th, html.brutal td { padding: .55rem .6rem; }
+html.brutal tfoot td, html.brutal tfoot th { background: #000; color: var(--text); border-top: 3px solid var(--accent); }
+html.brutal tbody tr:hover > td, html.brutal tbody tr:hover > th { background: var(--surface-hover); }
+html.brutal tbody th[scope="row"], html.brutal .page-summary tbody tr > :first-child { background: var(--surface); }
+html.brutal .tag { border-radius: 0; box-shadow: inset 0 0 0 2px currentColor; background: transparent; color: var(--text);
+                   text-transform: uppercase; letter-spacing: .06em; }
+html.brutal .tag-cancelled { color: var(--danger); background: var(--danger-soft); box-shadow: inset 0 0 0 2px var(--danger); }
+html.brutal .tag-shop { color: var(--focus); }
+html.brutal .row-actions a { border-radius: 0; text-transform: uppercase; font-weight: 700; }
+html.brutal .row-actions a:hover { background: var(--text); color: #000; }
+html.brutal .row-actions a.danger:hover { background: var(--danger); color: #000; }
+html.brutal tr.history > td { background: #111110; }
+
+/* Summary: each period a slab with its own heavy coloured edge. */
+html.brutal .period { border-left-width: 16px; padding: .75rem 1.5rem 1.5rem; }
+html.brutal .all-time { border-left-color: var(--accent); }
+html.brutal .owes-whom { border-left-color: var(--focus); }
+html.brutal .this-year { border-left-color: var(--income); }
+html.brutal .last-year { border-left-color: var(--warning-edge); }
+html.brutal .month-by-month { border-left-color: var(--field-border); }
+html.brutal .grid td.self { background: repeating-linear-gradient(45deg, #000 0 6px, var(--surface-2) 6px 12px); }
+
+/* The date picker comes with its own light colours: cast it in concrete too. */
+html.brutal .flatpickr-calendar { background: var(--surface); border: 3px solid #000; border-radius: 0; box-shadow: var(--shadow); }
+html.brutal .flatpickr-calendar::before, html.brutal .flatpickr-calendar::after { display: none; }
+html.brutal .flatpickr-months .flatpickr-month, html.brutal .flatpickr-current-month input.cur-year,
+html.brutal .flatpickr-current-month .flatpickr-monthDropdown-months, html.brutal span.flatpickr-weekday,
+html.brutal .flatpickr-day { color: var(--text); fill: var(--text); background: transparent; }
+html.brutal .flatpickr-months .flatpickr-prev-month, html.brutal .flatpickr-months .flatpickr-next-month { color: var(--text); fill: var(--text); }
+html.brutal .flatpickr-day { border-radius: 0; }
+html.brutal .flatpickr-day:hover { background: var(--text); color: #000; border-color: var(--text); }
+html.brutal .flatpickr-day.selected { background: var(--accent); border-color: var(--accent); color: #000; }
+html.brutal .flatpickr-day.flatpickr-disabled, html.brutal .flatpickr-day.prevMonthDay,
+html.brutal .flatpickr-day.nextMonthDay { color: #6a6863; }
+html.brutal .flatpickr-day.today { border-color: var(--focus); }
+
+/* ---------- Game (its page; the game itself draws on the canvas) ---------- */
+.game { display: grid; gap: 1rem; }
+.game-screen { position: relative; border: 3px solid #000; box-shadow: var(--shadow-lg); background: #000; }
+.game-screen canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; cursor: crosshair; }
+.game-help { color: var(--muted); font-size: .9rem; margin: 0; }
+.game-help kbd { border: 1px solid var(--field-border); padding: 0 .35rem; font-family: inherit; }
+
 /* ---------- Print (the summary especially): just the figures, on white, nothing cut off ---------- */
 @media print {
   @page { margin: 1.5cm; }
   body { background: #fff; color: #000; font-size: 11pt; }
-  .site-header, .messages, .forms, .filters, .filter-note, .actions, .row-actions, .btn, form button,
+  .site-header, .look-switch, .messages, .forms, .filters, .filter-note, .actions, .row-actions, .btn, form button,
   .table-wrap.scrolls::before, script { display: none !important; }
   main, body.wide main { max-width: none; margin: 0; padding: 0; }
   .card, .table-wrap { box-shadow: none; border-color: #bbb; }
@@ -363,4 +561,9 @@ tr.history > td { background: var(--surface-hover); white-space: normal; }
   .period:first-of-type { break-before: auto; }
   a { color: inherit; text-decoration: none; }
   .zero, .muted { color: #444; }
+  /* The brutalist look prints like the normal one: dark concrete on paper would be unreadable. */
+  html.brutal { --text: #000; --muted: #444; --surface: #fff; --surface-2: #eee; --border: #bbb; --accent: #000; }
+  html.brutal body { background: #fff; color: #000; }
+  html.brutal .card, html.brutal .table-wrap, html.brutal .period, html.brutal .panel { background: #fff; box-shadow: none; }
+  html.brutal thead th, html.brutal tfoot td, html.brutal tfoot th { background: #fff; color: #000; }
 }

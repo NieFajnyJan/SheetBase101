@@ -9,9 +9,9 @@ from django.db.models.functions import ExtractYear
 from django.http import Http404, QueryDict
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
-from django.utils.http import urlencode
+from django.utils.http import url_has_allowed_host_and_scheme, urlencode
 from django.utils import timezone
-from django.views.decorators.http import require_GET
+from django.views.decorators.http import require_GET, require_POST
 
 from .forms import (
     DATE_FORMATS,
@@ -38,6 +38,7 @@ from .models import (
 from .payments import PlanChanged, cancel_effects, plan_payment, record_payment
 from .splits import save_split
 from .summary import ZERO, all_time_summary, month_by_month, who_owes_whom, year_summary
+from .templatetags.money import zl
 
 
 class DebtGone(Exception):
@@ -403,4 +404,35 @@ def summary(request):
         "summaries": [year_summary(today.year), year_summary(today.year - 1)],
         "months": month_by_month(today.year),
         "this_year": today.year,
+    })
+
+
+# The look of the app, as each browser chose it: the normal one, or the brutalist one (see app.css).
+# A cookie, so the page comes in that look straight away and the switch works without JavaScript.
+LOOK_COOKIE, BRUTALIST = "look", "brutalist"
+
+
+@require_POST
+def set_look(request):
+    """The switch in the header: turns the brutalist look on or off, then back to the page it was clicked on."""
+    back = request.POST.get("next", "")
+    if not url_has_allowed_host_and_scheme(back, {request.get_host()}, require_https=request.is_secure()):
+        back = reverse("transactions")
+    response = redirect(back)
+    if request.POST.get("look") == BRUTALIST:
+        response.set_cookie(LOOK_COOKIE, BRUTALIST, max_age=365 * 24 * 60 * 60, samesite="Lax")
+    else:
+        response.delete_cookie(LOOK_COOKIE, samesite="Lax")
+    return response
+
+
+@login_required
+def game(request):
+    """A first-person shooter in concrete corridors. The enemies are the user's open debts – only on screen:
+    nothing in the game changes any debt."""
+    debts = (PlannedTransaction.objects.open().filter(debtor=request.user).select_related("creditor")
+             .order_by("created_at", "pk"))
+    return render(request, "sheetapp/game.html", {
+        "enemies": [{"what": d.description[:24], "amount": zl(d.amount), "value": float(d.amount), "to": str(d.creditor)}
+                    for d in debts[:40]],
     })

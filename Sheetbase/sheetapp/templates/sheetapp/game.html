@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block body_class %}wide page-game{% endblock %}
+{% block title %}Collections · SheetBase{% endblock %}
+
+{% block content %}
+  <div class="game">
+    <h1>Collections</h1>
+    <p class="game-help">Your open debts are loose in the concrete. Stamp every one of them PAID before they bury you.
+      It's only a game: nothing here changes a real debt – pay those on <a href="{% url 'planned' %}">Debts</a>.</p>
+    <div class="game-screen">
+      <canvas id="game" width="480" height="270" tabindex="0"
+              aria-label="Collections: a first-person game. Click to play; Escape to stop.">Your browser can't show the game.</canvas>
+    </div>
+    <p class="game-help">Click the screen to play · <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> move ·
+      mouse or <kbd>←</kbd><kbd>→</kbd> turn · click or <kbd>Space</kbd> stamp · <kbd>M</kbd> sound on/off ·
+      <kbd>Esc</kbd> stop. Keyboard and mouse only.</p>
+  </div>
+  {{ enemies|json_script:"game-enemies" }}
+  <script src="{% static 'sheetapp/game.js' %}"></script>
+{% endblock %}
