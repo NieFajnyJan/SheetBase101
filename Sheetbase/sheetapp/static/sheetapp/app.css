@@ -107,20 +107,32 @@ code { font-size: .9em; background: var(--surface-2); padding: .1em .35em; borde
   .site-header .user { max-width: 10ch; }
 }
 
-/* The look switch: small and quiet in the bottom right corner, there for whoever looks for it. */
-.look-switch { position: fixed; right: .4rem; bottom: .4rem; z-index: 50; margin: 0; }
-.look-switch button {
-  display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .3rem; border: 0; background: none;
-  font: inherit; font-size: .7rem; color: var(--muted); cursor: pointer; opacity: .5; transition: opacity var(--ease);
+/* The look menu: small and quiet in the bottom right corner, there for whoever looks for it.
+   Its looks open upwards from the button, right-aligned with it; the one in use is ticked. */
+.look-switch { position: fixed; right: .4rem; bottom: .4rem; z-index: 50; margin: 0; font-size: .75rem; }
+.look-switch > summary {
+  list-style: none; display: inline-flex; align-items: center; gap: .35rem; padding: .2rem .4rem;
+  color: var(--muted); cursor: pointer; opacity: .55; border-radius: var(--radius-sm); transition: opacity var(--ease);
+  user-select: none;
 }
-.look-switch button:hover, .look-switch button:focus-visible { opacity: 1; }
-/* The track, with its knob on the left (off) or the right (on). */
-.look-switch button::before {
-  content: ""; flex: none; width: 1.6rem; height: .9rem; border-radius: 999px; background-color: var(--field-border);
-  background-image: radial-gradient(circle, #fff 0 .3rem, transparent .32rem);
-  background-size: .9rem .9rem; background-repeat: no-repeat; background-position: left center;
+.look-switch > summary::-webkit-details-marker { display: none; }
+.look-switch > summary::after { content: "▴"; font-size: .9em; }
+.look-switch[open] > summary::after { content: "▾"; }
+.look-switch > summary:hover, .look-switch > summary:focus-visible, .look-switch[open] > summary { opacity: 1; }
+.look-switch form { position: absolute; right: 0; bottom: calc(100% + .3rem); margin: 0; }
+.look-switch ul {
+  list-style: none; margin: 0; padding: .3rem; min-width: 9rem; background: var(--surface); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
 }
-.look-switch button[aria-checked="true"]::before { background-color: var(--accent); background-position: right center; }
+.look-switch li button {
+  display: flex; align-items: center; gap: .5rem; width: 100%; padding: .4rem .6rem; border: 0; background: none;
+  border-radius: calc(var(--radius-sm) - 2px); font: inherit; font-size: .85rem; color: inherit; text-align: left;
+  cursor: pointer;
+}
+.look-switch li button::before { content: ""; width: 1em; flex: none; }
+.look-switch li button[aria-current="true"] { font-weight: 700; }
+.look-switch li button[aria-current="true"]::before { content: "✓"; color: var(--accent-text); }
+.look-switch li button:hover, .look-switch li button:focus-visible { background: var(--surface-2); }
 
 /* ---------- Layout ---------- */
 main { max-width: 520px; margin: 2rem auto 3rem; padding: 0 1rem; }
@@ -459,12 +471,10 @@ html.brutal .site-header nav a[aria-current="page"] { background: var(--accent);
 html.brutal .site-header button { border: 2px solid var(--text); border-radius: 0; text-transform: uppercase; font-weight: 700; }
 html.brutal .site-header button:hover { background: var(--text); color: #000; }
 html.brutal .site-header a:focus-visible, html.brutal .site-header button:focus-visible { outline-color: var(--focus); }
-html.brutal .look-switch button { text-transform: uppercase; font-weight: 700; }
-html.brutal .look-switch button::before {
-  border-radius: 0; border: 2px solid #000; background-color: var(--surface-2);
-  background-image: linear-gradient(var(--text), var(--text)); background-size: .5rem .5rem;
-}
-html.brutal .look-switch button[aria-checked="true"]::before { background-color: var(--accent); background-image: linear-gradient(#000, #000); }
+html.brutal .look-switch > summary { text-transform: uppercase; font-weight: 700; border-radius: 0; }
+html.brutal .look-switch ul { border: 3px solid #000; }
+html.brutal .look-switch li button { text-transform: uppercase; font-weight: 700; }
+html.brutal .look-switch li button:hover, html.brutal .look-switch li button:focus-visible { background: var(--focus); color: #000; }
 
 /* Buttons: blocks that are pushed in when pressed. */
 html.brutal .btn {
@@ -536,6 +546,284 @@ html.brutal .flatpickr-day.flatpickr-disabled, html.brutal .flatpickr-day.prevMo
 html.brutal .flatpickr-day.nextMonthDay { color: #6a6863; }
 html.brutal .flatpickr-day.today { border-color: var(--focus); }
 
+/* ---------- The ZUS look (html.zus, picked in the look menu) ----------
+   A joke: a copy of the ZUS e-services portal (PUE), down to its pixel sizes. A fixed 1024px page on office grey;
+   the header with "Jesteś zalogowany jako", show-only links and folder tabs; the menu down the left as grey
+   2-line boxes, the current one lime; a white 770px work area under a grey title bar with its "?",
+   the "Wybrany użytkownik … Zmień" strip and a breadcrumb tab; lime title bars and pill legends; Dojo-style
+   grids, 20px glossy buttons, 6px-rounded fields; and the status bar with the session counting down.
+   The menu, the title bar and the status bar take Polish words from base.html (data-pl, data-sub, .zus-*).
+   It doesn't change to fit a phone: the portal doesn't either. Only overrides what's above. */
+html.zus {
+  --bg: #eaeaea;
+  --surface: #f5f5f5;
+  --surface-2: #f7f7f7;
+  --surface-hover: #e8f1cd;
+  --border: #cfcfcf;
+  --field-border: #b5bcc7;
+  --text: #212324;
+  --muted: #6a6b6b;
+  --brand: #212324;
+  --brand-hover: #000;
+  --brand-soft: #e8f1cd;
+  --accent: #aaca45;
+  --accent-text: #a54625;     /* the portal's rust-coloured links ("Zmień") */
+  --accent-soft: #f2f7e1;
+  --focus: #000;
+  --income: #212324;
+  --expense: #c00;
+  --danger: #c00;
+  --danger-hover: #900;
+  --danger-soft: #fdeaea;
+  --success: #212324;
+  --success-soft: #f2f7e1;
+  --warning: #212324;
+  --warning-edge: #f5d709;
+  --warning-soft: #fffbe0;
+  --info: #b5bcc7;
+  --info-soft: #fff;
+  --highlight: #e8f1cd;
+
+  --radius: 6px;
+  --radius-sm: 4px;
+  --shadow: 0 1px 2px rgb(0 0 0 / .25);
+  --shadow-lg: 0 2px 5px rgb(0 0 0 / .15);
+  --ease: 0ms linear;
+  --gloss: linear-gradient(#ffffff, #f1f1f1 48%, #dcdcdc 52%, #e9e9e9);
+  --gloss-hover: linear-gradient(#a6c34a, #85a428 48%, #6f8d17 52%, #7f9d22);
+  --oswald: Oswald, "Bebas Neue", "Arial Narrow", "Nimbus Sans Narrow", "DejaVu Sans Condensed", Tahoma, sans-serif;
+
+  /* The grey band across the top of the window, its line, and the header's pale gradient below it. */
+  background: linear-gradient(#e4e4e4, #d2d2d2) 0 0 / 100% 15px no-repeat,
+              linear-gradient(#afb5b1, #afb5b1) 0 15px / 100% 1px no-repeat,
+              linear-gradient(#f6f6f6, #eaeaea) 0 16px / 100% 62px no-repeat,
+              #eaeaea;
+}
+html.zus body {
+  width: 1024px; margin: 0 auto; background: none; position: relative;
+  font-family: Tahoma, Verdana, "DejaVu Sans", Helvetica, sans-serif; font-size: 13px; line-height: 1.3;
+  color: var(--text); -webkit-font-smoothing: auto;
+}
+html.zus a { color: var(--accent-text); text-decoration: none; }
+html.zus a:hover { color: var(--accent-text); text-decoration: underline; }
+html.zus :focus-visible { outline: 1px dotted #000; outline-offset: 0; }
+
+/* Header: 78px, nothing sticks. Everything placed where the portal has it. */
+html.zus .site-header { position: relative; top: auto; height: 78px; background: none; color: var(--text); box-shadow: none; }
+html.zus .site-header .inner { display: block; max-width: none; height: 100%; padding: 0; }
+html.zus .site-header a, html.zus .site-header button { color: var(--text); }
+/* The logo: heavy slanted green letters cut by white stripes – a look-alike, not the real one. */
+html.zus .site-header .brand {
+  position: absolute; left: 5px; top: 21px; width: 67px; height: 41px; margin: 0; padding: 0; gap: 0;
+  font-size: 0; display: block; text-decoration: none;
+}
+html.zus .site-header .brand svg { display: none; }
+html.zus .site-header .brand::before {
+  content: "SB"; display: block; font: italic 900 40px/41px "Arial Black", "DejaVu Sans", sans-serif; letter-spacing: -3px;
+  color: transparent; -webkit-background-clip: text; background-clip: text;
+  background-image: repeating-linear-gradient(180deg, #00663a 0 6px, transparent 6px 8px);
+}
+html.zus .site-header .account {
+  position: absolute; left: 91px; top: 23px; display: flex; flex-direction: column; align-items: flex-start; gap: 5px;
+}
+html.zus .site-header .user {
+  max-width: none; padding: 0; border-radius: 0; opacity: 1; font-weight: 700; color: #000; text-transform: uppercase;
+  text-decoration: none;
+}
+html.zus .site-header .user::before { content: "Jesteś zalogowany jako: "; font-weight: 400; color: var(--text); text-transform: none; }
+html.zus .site-header .user:hover { background: none; text-decoration: none; }
+/* Log out reads "Wyloguj", as a 20px glossy button. */
+html.zus .site-header button { font-size: 0; }
+html.zus .site-header button::after { content: "Wyloguj"; font-size: 13px; }
+
+/* The show-only links (top right) and the folder tabs sitting on the header's bottom edge. */
+html.zus .zus-top { position: absolute; right: 0; top: 20px; bottom: 0; width: 725px; }
+html.zus .zus-links {
+  display: flex; justify-content: flex-end; align-items: flex-start; gap: 0; list-style: none; margin: 2px 5px 0 0; padding: 0;
+  white-space: nowrap; text-align: right;
+}
+html.zus .zus-links li {
+  position: relative; margin-left: 16px; padding: 3px 31px 0 0; min-height: 20px; color: #4f4c54; font-size: 11px; font-weight: 700;
+  line-height: 1.2;
+}
+/* Their little icons: grey rounded squares; the language one a flag. */
+html.zus .zus-links li::after {
+  content: ""; position: absolute; right: 4px; top: 1px; width: 20px; height: 20px; border-radius: 4px;
+  background: linear-gradient(#9b9b9b, #6f6f6f); box-shadow: inset 0 0 0 1px #5d5d5d;
+}
+html.zus .zus-links li:last-child::after { width: 24px; height: 16px; top: 8px; border-radius: 0; box-shadow: none;
+                                           background: linear-gradient(#0057b7 50%, #ffd700 50%); top: 3px; }
+html.zus .zus-tabs { position: absolute; right: 5px; bottom: 0; display: flex; list-style: none; margin: 0; padding: 0; }
+html.zus .zus-tabs li {
+  height: 19px; margin-top: 5px; padding: 0 15px; border: 1px solid #696969; border-bottom: 0; border-radius: 4px 4px 0 0;
+  background: linear-gradient(#fdfdfd, #d8d8d8); font-size: 11px; font-weight: 700; line-height: 21px; color: #4f4c54; align-self: flex-end;
+}
+html.zus .zus-tabs li.selected { height: 22px; margin-top: 3px; background: #fff; color: #000; }
+html.zus .zus-tabs li.e { background: linear-gradient(#bfd86b, #8fb02e); color: #fff; }
+html.zus .site-header::after { content: ""; position: absolute; left: 254px; right: 0; bottom: 0; border-bottom: 1px solid #696969; }
+
+/* The menu down the left: "MENU", then a grey 2-line box per page (Polish name and what's in it); the page you're on lime. */
+html.zus .site-header nav { position: absolute; left: 0; top: 100%; width: 251px; margin: 0; z-index: 2; }
+html.zus .site-header nav::before {
+  content: "MENU"; display: block; height: 37px; padding: 9px 9px 0; font: 15px var(--oswald); letter-spacing: .02em;
+  color: #eaeaea; text-shadow: 1px 1px 0 #fff, -1px -1px 0 #b9b9b9;
+}
+html.zus .site-header nav ul { display: block; }
+html.zus .site-header nav li { margin: 0 0 2px; }
+html.zus .site-header nav a {
+  display: flex; flex-direction: column; justify-content: center; min-height: 56px; padding: 3px 10px;
+  background: #d9d9d9; border: 1px solid #b1b1b1; border-radius: 5px; box-shadow: none; font-size: 0; color: var(--text);
+}
+html.zus .site-header nav a::before { content: attr(data-pl); font-size: 13px; font-weight: 700; line-height: 1.7; }
+html.zus .site-header nav a::after { content: attr(data-sub); font-size: 13px; line-height: 1.7; }
+html.zus .site-header nav a:hover { background: #d9d9d9; border-color: #719007; text-decoration: none; }
+html.zus .site-header nav a[aria-current="page"] { background: #abcb46; font-weight: 400; box-shadow: none; }
+html.zus .site-header nav a:focus-visible { outline: 1px dotted #000; outline-offset: -3px; }
+
+/* The work area's head: the grey title bar with its "?", who's chosen, and the page's breadcrumb tab over a black line. */
+html.zus .zus-title { margin-left: 254px; width: 770px; }
+html.zus .zus-title-bar {
+  height: 37px; padding: 9px 16px 0; border-radius: 5px 5px 0 0; background: #6a6b6b; color: #fff;
+  font: 16px/1.3 var(--oswald); text-transform: uppercase; text-shadow: 0 0 1px #000; white-space: nowrap;
+}
+html.zus .zus-help {
+  display: inline-block; width: 17px; height: 17px; margin: 0 0 2px 6px; vertical-align: bottom; border: 2px solid #fff;
+  border-radius: 2px; background: #3f7d1d; font: 700 12px/13px Tahoma, sans-serif; text-align: center; text-shadow: none;
+}
+html.zus .zus-context { background: #fff; padding: 3px 5px; border-bottom: 1px solid #cfcfcf; text-align: right; min-height: 22px; }
+html.zus .zus-context b { color: #000; text-transform: uppercase; }
+html.zus .zus-crumb { position: relative; height: 38px; background: #fff; border-bottom: 3px solid #212324; }
+html.zus .zus-crumb::before { content: "◀"; position: absolute; left: 4px; bottom: 6px; font-size: 10px; color: #9a9a9a; }
+html.zus .zus-crumb-tab {
+  position: absolute; left: 24px; bottom: 0; padding: 6px 6px 4px; border-left: 3px solid #212324; border-right: 1px solid #fff;
+  border-radius: 4px 4px 0 0; background: #fff; font-size: 11px; font-weight: 700; color: #000;
+}
+html.zus .zus-crumb-arrows { position: absolute; right: 6px; bottom: 1px; font-size: 11px; color: #212324; letter-spacing: 10px; }
+
+/* The work area itself: white, 770px, beside the menu. */
+html.zus main, html.zus body.wide main {
+  max-width: none; width: 770px; margin: 0 0 0 254px; padding: 6px 5px 20px; background: #fff;
+  border: 1px solid #cfcfcf; border-top: 0; border-radius: 0 0 5px 5px; min-height: max(540px, calc(100vh - 230px));
+}
+html.zus .forms { max-width: none; }
+
+/* Headings: the page's own name and each section a lime title bar, 13px bold; inside a panel, a lime pill on its edge. */
+html.zus h1, html.zus h2, html.zus .section-title {
+  font-family: inherit; font-size: 13px; font-weight: 700; line-height: 1.4; letter-spacing: 0; text-transform: none;
+  background: #aaca45; color: #000; padding: 2px 3px 3px 7px; margin: 6px 0; border-radius: 0;
+}
+html.zus h1::after { content: " *"; }
+html.zus h3 { font-size: 13px; }
+html.zus .card > h1:first-child, html.zus .card > h2:first-child, html.zus .period > h2:first-child, html.zus h3,
+html.zus .split legend {
+  display: block; width: fit-content; margin: -23px 0 8px -2px; padding: 3px 10px; border-radius: 6px; background: #aaca45; color: #000;
+  font-size: 13px; font-weight: 700;
+}
+html.zus .card > h1:first-child::after { content: ":"; }
+html.zus .split legend { margin: 0; }
+html.zus h3 { margin: .9rem 0 .5rem; }
+
+/* Panels: the portal's fieldsets – pale grey, a grey edge, 6px corners, a soft shadow under. */
+html.zus .card, html.zus .period {
+  background: #f5f5f5; border: 1px solid #cfcfcf; border-radius: 6px; box-shadow: var(--shadow); padding: 11px;
+  margin: 22px 0 12px;
+}
+html.zus details.card, html.zus .filters { margin-top: 10px; }
+html.zus .period { border-left-width: 1px; }
+html.zus .all-time, html.zus .owes-whom, html.zus .this-year, html.zus .last-year, html.zus .month-by-month {
+  background: #f5f5f5; border-color: #cfcfcf; }
+html.zus .panel, html.zus .add-shop, html.zus .split { background: #fff; border: 1px solid #cfcfcf; border-radius: 6px; }
+html.zus .msg, html.zus .blocked {
+  background: #fff; border: 1px solid #b5bcc7; border-top: 20px solid #aaca45; border-radius: 0; padding: .5rem 11px;
+}
+html.zus .msg-warning { border-top-color: #f5d709; }
+html.zus .msg-error, html.zus .blocked { border-top-color: #d46464; }
+html.zus .msg-info { border-top-color: #b5bcc7; }
+
+/* Labels to the side in grey with a white emboss, fields Dojo-sized with 6px corners. */
+html.zus label, html.zus .field-participants legend { font-weight: 400; color: #6a6b6b; text-shadow: 1px 1px 0 #fff; }
+html.zus input[type=text], html.zus input[type=email], html.zus input[type=password], html.zus input[type=date],
+html.zus input[type=number], html.zus textarea {
+  min-height: 27px; height: 27px; padding: 2px 4px; background: #fff; border: 1px solid #b5bcc7; border-radius: 6px; box-shadow: none;
+}
+html.zus textarea { height: auto; }
+html.zus select {
+  min-height: 30px; height: 30px; padding: 2px 30px 2px 4px; background-color: #fff; border: 1px solid #b5bcc7; border-radius: 6px;
+}
+/* Its arrow: a small rounded grey button inside the box, as Dojo draws it. */
+html.zus select:not([multiple]), html.zus select:not([multiple]):disabled {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='22' height='24'%3E%3Crect x='.5' y='.5' width='21' height='23' rx='4' fill='%23f1f1f1' stroke='%23707070'/%3E%3Cpath d='M7 10h8l-4 5z' fill='%23212324'/%3E%3C/svg%3E");
+  background-position: right 3px center; background-size: 22px 24px;
+}
+html.zus input:hover, html.zus select:hover, html.zus textarea:hover { border-color: #b5bcc7; }
+html.zus input:focus-visible, html.zus select:focus-visible, html.zus textarea:focus-visible { border-color: #aaca45; outline: 1px dotted #000; }
+html.zus input:disabled, html.zus select:disabled { background-color: #eef2e1; border-style: solid; }
+html.zus input[type=checkbox], html.zus input[type=radio] { accent-color: auto; }
+html.zus .helptext { color: #6a6b6b; font-size: 11px; }
+html.zus .errorlist { color: red; font-weight: 400; }
+html.zus .date-pick { width: 27px; background: var(--gloss); border: 0; border-left: 1px solid #696969; border-right: 1px solid #696969;
+                      border-radius: 4px; color: var(--text); }
+html.zus .date-pick:hover { background: var(--gloss-hover); color: #fff; }
+
+/* Buttons: 20px glossy grey, dark edges only left and right; green with white letters under the pointer. */
+html.zus .btn, html.zus .btn-secondary, html.zus .btn-social, html.zus .btn-danger, html.zus .adder[open] > summary,
+html.zus .site-header button, html.zus .look-switch > summary {
+  min-height: 22px; height: auto; padding: 1px 8px 2px; background: var(--gloss); color: var(--text);
+  border: 0; border-left: 1px solid #696969; border-right: 1px solid #696969; border-radius: 4px; box-shadow: none;
+  font-weight: 400; font-size: 13px; line-height: 19px; opacity: 1;
+}
+html.zus .btn:hover, html.zus .btn-secondary:hover, html.zus .btn-social:hover, html.zus .btn-danger:hover,
+html.zus .site-header button:hover, html.zus .look-switch > summary:hover {
+  background: var(--gloss-hover); color: #fff; border-color: #000; box-shadow: none; text-decoration: none;
+}
+html.zus .btn:active { transform: none; }
+html.zus .site-header button { font-size: 0; }
+html.zus .btn-danger { color: #c00; }
+html.zus .actions { margin-top: 12px; gap: 6px; }
+html.zus .tick-all { color: var(--accent-text); }
+html.zus .row-actions a { border-radius: 0; padding: 0 4px; color: var(--accent-text); font-weight: 400; }
+html.zus .row-actions a:hover { background: none; text-decoration: underline; }
+html.zus .row-actions a.danger { color: #c00; }
+html.zus .row-actions a.danger:hover { background: none; }
+
+/* Tables: Dojo grids – pale blue heads with grey and white edges, centred small text; rows white and #f7f7f7,
+   lime with lime lines under the pointer. */
+html.zus .table-wrap { background: #fff; border: 1px solid #b5bcc7; border-radius: 0; box-shadow: none; }
+html.zus table { font-size: 13px; }
+html.zus th, html.zus td { padding: 3px 5px; border: 0; }
+html.zus thead th, html.zus .page-summary thead th {
+  background: #e3ebf3; color: var(--text); font-size: 11px; font-weight: 400; text-transform: none; letter-spacing: 0;
+  text-align: center; vertical-align: middle; padding: 6px 5px;
+  border-style: solid; border-width: 0 1px 1px 0; border-color: #eaeaea #c9cacb #c9cacb #eaeaea;
+}
+html.zus thead th:last-child { border-right: 0; }
+html.zus tbody tr > td, html.zus tbody tr > th, html.zus tbody th[scope="row"] { background: #fff; border-top: 1px solid transparent; border-bottom: 1px solid transparent; }
+html.zus tbody tr:nth-child(even) > td, html.zus tbody tr:nth-child(even) > th { background: #f7f7f7; }
+html.zus tbody tr:hover > td, html.zus tbody tr:hover > th { background: #e8f1cd; border-bottom-color: #aaca45; }
+html.zus tfoot td, html.zus tfoot th { background: #e8f1cd; border-top: 1px solid #aaca45; font-weight: 700; }
+html.zus tr:target > td, html.zus tr:target > th { background: #e5dac8; }
+html.zus .balances .card { padding: 11px; }
+html.zus .tag { border-radius: 0; background: none; box-shadow: none; padding: 0; font-size: 11px; color: var(--muted); }
+html.zus .tag-cancelled { color: #c00; font-weight: 700; }
+html.zus .tag-shop { font-size: 11px; }
+html.zus tr.history > td { background: #f2f7e1; }
+html.zus .grid td.self { background: #eaeaea; }
+html.zus .table-wrap.scrolls::before { font-size: 11px; }
+
+/* The status bar along the bottom: where you are, cookies, the session running out, the version. */
+html.zus .zus-status {
+  display: flex; flex-wrap: wrap; gap: 0 4px; width: 1016px; margin: 2px 0 0; padding: 4px; min-height: 22px;
+  background: linear-gradient(#f1f1f1, #d9d9d9); color: #636466; font-size: 11px; white-space: nowrap;
+}
+html.zus .zus-status .zus-sep { border-left: 1px solid #636466; margin-left: 6px; padding-left: 6px; }
+
+/* The look menu, in the portal's grey. */
+html.zus .look-switch { font-size: 13px; }
+html.zus .look-switch ul { background: #fff; border: 1px solid #919090; border-radius: 0; box-shadow: var(--shadow-lg); padding: 0; }
+html.zus .look-switch li button { border-radius: 0; font-size: 13px; padding: 4px 10px; }
+html.zus .look-switch li button:hover, html.zus .look-switch li button:focus-visible { background: #e8f1cd; }
+html.zus .look-switch li button[aria-current="true"]::before { color: #000; }
+
 /* ---------- Game (its page; the game itself draws on the canvas) ---------- */
 .game { display: grid; gap: 1rem; }
 .game-screen { position: relative; border: 3px solid #000; box-shadow: var(--shadow-lg); background: #000; }
@@ -547,7 +835,7 @@ html.brutal .flatpickr-day.today { border-color: var(--focus); }
 @media print {
   @page { margin: 1.5cm; }
   body { background: #fff; color: #000; font-size: 11pt; }
-  .site-header, .look-switch, .messages, .forms, .filters, .filter-note, .actions, .row-actions, .btn, form button,
+  .site-header, .look-switch, .zus-title, .zus-status, .messages, .forms, .filters, .filter-note, .actions, .row-actions, .btn, form button,
   .table-wrap.scrolls::before, script { display: none !important; }
   main, body.wide main { max-width: none; margin: 0; padding: 0; }
   .card, .table-wrap { box-shadow: none; border-color: #bbb; }
@@ -565,6 +853,8 @@ html.brutal .flatpickr-day.today { border-color: var(--focus); }
   /* The brutalist look prints like the normal one: dark concrete on paper would be unreadable. */
   html.brutal { --text: #000; --muted: #444; --surface: #fff; --surface-2: #eee; --border: #bbb; --accent: #000; }
   html.brutal body { background: #fff; color: #000; }
+  html.zus, html.zus body { background: #fff; width: auto; }
+  html.zus main { width: auto; margin: 0; border: 0; min-height: 0; }
   html.brutal .card, html.brutal .table-wrap, html.brutal .period, html.brutal .panel { background: #fff; box-shadow: none; }
   html.brutal thead th, html.brutal tfoot td, html.brutal tfoot th { background: #fff; color: #000; }
 }

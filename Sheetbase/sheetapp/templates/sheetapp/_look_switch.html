@@ -1,9 +1,14 @@
-{# A small switch tucked in the bottom right corner: the normal look or the brutalist one, kept in this browser. #}
-<form class="look-switch" method="post" action="{% url 'set_look' %}">{% csrf_token %}
-  <input type="hidden" name="next" value="{{ request.get_full_path }}">
-  {% if request.COOKIES.look == "brutalist" %}
-    <button name="look" value="normal" role="switch" aria-checked="true" title="Back to the normal look">Brutalist</button>
-  {% else %}
-    <button name="look" value="brutalist" role="switch" aria-checked="false" title="Raw concrete, sharp edges, dark">Brutalist</button>
-  {% endif %}
-</form>
+{# A small menu tucked in the bottom right corner: the looks open upwards from its button; the one picked is kept in this browser. #}
+{% with look=request.COOKIES.look %}
+<details class="look-switch">
+  <summary title="Change how SheetBase looks">Look: {% if look == "brutalist" %}Brutalist{% elif look == "zus" %}ZUS{% else %}Normal{% endif %}</summary>
+  <form method="post" action="{% url 'set_look' %}">{% csrf_token %}
+    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+    <ul aria-label="Looks">
+      <li><button name="look" value="zus"{% if look == "zus" %} aria-current="true"{% endif %} title="Grey panels, green bars, small Tahoma: like the ZUS portal">ZUS</button></li>
+      <li><button name="look" value="brutalist"{% if look == "brutalist" %} aria-current="true"{% endif %} title="Raw concrete, sharp edges, dark">Brutalist</button></li>
+      <li><button name="look" value="normal"{% if look != "brutalist" and look != "zus" %} aria-current="true"{% endif %} title="Light, clean, rounded">Normal</button></li>
+    </ul>
+  </form>
+</details>
+{% endwith %}

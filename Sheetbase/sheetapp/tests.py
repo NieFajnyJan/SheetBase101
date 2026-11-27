@@ -717,7 +717,8 @@ class LookTests(TestCase):
     def test_normal_look_to_start_with(self):
         html = self.client.get(reverse("summary")).content.decode()
         self.assertIn('<html lang="en">', html)
-        self.assertIn('<button name="look" value="brutalist" role="switch" aria-checked="false"', html)
+        self.assertIn("Look: Normal</summary>", html)
+        self.assertIn('<button name="look" value="normal" aria-current="true"', html)
         self.assertNotIn(f'href="{reverse("game")}"', html)  # the game comes with the brutalist look
 
     def test_switching_on_and_off_and_back_to_the_same_page(self):
@@ -726,9 +727,26 @@ class LookTests(TestCase):
         self.assertEqual(response.cookies["look"].value, "brutalist")
         html = self.client.get(reverse("summary")).content.decode()
         self.assertIn('<html lang="en" class="brutal">', html)
-        self.assertIn('<button name="look" value="normal" role="switch" aria-checked="true"', html)
+        self.assertIn("Look: Brutalist</summary>", html)
+        self.assertIn('<button name="look" value="brutalist" aria-current="true"', html)
+        self.assertNotIn('<button name="look" value="normal" aria-current', html)
         self.assertIn(f'href="{reverse("game")}"', html)
         self.client.post(self.url, {"look": "normal", "next": "/summary/"})
+        self.assertIn('<html lang="en">', self.client.get(reverse("summary")).content.decode())
+
+    def test_the_zus_look(self):
+        response = self.client.post(self.url, {"look": "zus", "next": "/summary/"})
+        self.assertEqual(response.cookies["look"].value, "zus")
+        html = self.client.get(reverse("summary")).content.decode()
+        self.assertIn('<html lang="en" class="zus">', html)
+        self.assertIn("Look: ZUS</summary>", html)
+        self.assertIn('<button name="look" value="zus" aria-current="true"', html)
+        self.assertNotIn(f'href="{reverse("game")}"', html)  # the game stays with the brutalist look
+
+    def test_an_unknown_look_is_the_normal_one(self):
+        self.client.post(self.url, {"look": "zus", "next": "/summary/"})
+        response = self.client.post(self.url, {"look": "pink", "next": "/summary/"})
+        self.assertEqual(response.cookies["look"].value, "")  # deleted
         self.assertIn('<html lang="en">', self.client.get(reverse("summary")).content.decode())
 
     def test_works_logged_out_too(self):
@@ -750,6 +768,7 @@ class LookTests(TestCase):
         css = open(finders.find("sheetapp/app.css")).read()
         self.assertIn("html.brutal {", css)
         self.assertIn("--radius: 0;", css[css.index("html.brutal {"):])
+        self.assertIn("html.zus {", css)
 
 
 class GameTests(TestCase):

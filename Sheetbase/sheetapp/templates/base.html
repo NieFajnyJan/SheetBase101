@@ -1,6 +1,6 @@
 {% load static %}<!doctype html>
-{# The look each browser chose with the small switch in the bottom right corner: the brutalist one adds class="brutal" (see app.css). #}
-<html lang="en"{% if request.COOKIES.look == "brutalist" %} class="brutal"{% endif %}>
+{# The look each browser chose in the small menu in the bottom right corner: class="brutal" or class="zus" (see app.css). #}
+<html lang="en"{% if request.COOKIES.look == "brutalist" %} class="brutal"{% elif request.COOKIES.look == "zus" %} class="zus"{% endif %}>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -8,7 +8,7 @@
   {# All the styling is in one stylesheet; pages add nothing of their own. #}
   <link rel="stylesheet" href="{% static 'sheetapp/app.css' %}">
   <link rel="icon" href="{% static 'sheetapp/favicon.svg' %}" type="image/svg+xml">
-  <meta name="theme-color" content="{% if request.COOKIES.look == "brutalist" %}#000000{% else %}#0f172a{% endif %}">
+  <meta name="theme-color" content="{% if request.COOKIES.look == "brutalist" %}#000000{% elif request.COOKIES.look == "zus" %}#eaeaea{% else %}#0f172a{% endif %}">
   {% block extra_head %}{% endblock %}
 </head>
 <body class="{% block body_class %}{% endblock %}">
@@ -19,12 +19,12 @@
       {% with page=request.resolver_match.url_name %}
       <nav aria-label="Main">
         <ul>
-          <li><a href="{% url 'transactions' %}"{% if page == "transactions" or page == "correct_transaction" or page == "cancel_transaction" %} aria-current="page"{% endif %}>Transactions</a></li>
-          <li><a href="{% url 'planned' %}"{% if page == "planned" or page == "edit_planned" or page == "delete_planned" %} aria-current="page"{% endif %}>Debts</a></li>
-          <li><a href="{% url 'summary' %}"{% if page == "summary" %} aria-current="page"{% endif %}>Summary</a></li>
-          <li><a href="{% url 'shops' %}"{% if page == "shops" or page == "edit_shop" %} aria-current="page"{% endif %}>Shops</a></li>
-          {% if request.COOKIES.look == "brutalist" %}<li><a href="{% url 'game' %}"{% if page == "game" %} aria-current="page"{% endif %}>Game</a></li>{% endif %}
-          {% if user.is_staff %}<li><a href="{% url 'admin:index' %}">Admin</a></li>{% endif %}
+          <li><a href="{% url 'transactions' %}" data-pl="Transakcje" data-sub="Wpłaty, zakupy, historia"{% if page == "transactions" or page == "correct_transaction" or page == "cancel_transaction" %} aria-current="page"{% endif %}>Transactions</a></li>
+          <li><a href="{% url 'planned' %}" data-pl="Długi" data-sub="Zaległości i saldo"{% if page == "planned" or page == "edit_planned" or page == "delete_planned" %} aria-current="page"{% endif %}>Debts</a></li>
+          <li><a href="{% url 'summary' %}" data-pl="Podsumowanie" data-sub="Roczne zestawienie"{% if page == "summary" %} aria-current="page"{% endif %}>Summary</a></li>
+          <li><a href="{% url 'shops' %}" data-pl="Sklepy" data-sub="Rejestr płatników"{% if page == "shops" or page == "edit_shop" %} aria-current="page"{% endif %}>Shops</a></li>
+          {% if request.COOKIES.look == "brutalist" %}<li><a href="{% url 'game' %}" data-pl="Gra" data-sub="Windykacja"{% if page == "game" %} aria-current="page"{% endif %}>Game</a></li>{% endif %}
+          {% if user.is_staff %}<li><a href="{% url 'admin:index' %}" data-pl="Ustawienia" data-sub="Konfiguracja systemu">Admin</a></li>{% endif %}
         </ul>
       </nav>
       {% endwith %}
@@ -38,13 +38,37 @@
         <a href="{% url 'login' %}">Log in</a>
       </div>
     {% endif %}
+    {% if request.COOKIES.look == "zus" %}
+      {# The ZUS look's office furniture: links and tabs that are only for show, as on the portal. #}
+      <div class="zus-top" aria-hidden="true">
+        <ul class="zus-links"><li>Zadaj pytanie</li><li>Kontakt z CKK</li><li>Zgłoś incydent<br>bezpieczeństwa informacji</li><li>Мова</li></ul>
+        <ul class="zus-tabs"><li>Ogólny</li><li class="selected">Użytkownik</li><li>Płatnik</li><li class="e">ePłatnik</li></ul>
+      </div>
+    {% endif %}
    </div>
   </header>
+  {% if request.COOKIES.look == "zus" %}
+    {# The ZUS look's page title bar (filled from the page's title below), whose user and a breadcrumb tab. #}
+    <div class="zus-title" aria-hidden="true">
+      <div class="zus-title-bar"><span class="zus-page-name"></span><span class="zus-help">?</span></div>
+      <div class="zus-context">{% if user.is_authenticated %}Wybrany użytkownik: <b>{{ user }}</b> <a href="{% url 'transactions' %}" tabindex="-1">Zmień</a>{% endif %}</div>
+      <div class="zus-crumb"><span class="zus-crumb-tab"><span class="zus-page-name"></span></span><span class="zus-crumb-arrows">▶ ▼</span></div>
+    </div>
+  {% endif %}
   <main>
     {# Success green, information blue, warnings amber, errors red; warnings and errors are read out at once. #}
     {% if messages %}<div class="messages">{% for message in messages %}<p class="msg msg-{{ message.level_tag }}" role="{% if message.level_tag == "warning" or message.level_tag == "error" %}alert{% else %}status{% endif %}">{{ message }}</p>{% endfor %}</div>{% endif %}
     {% block content %}{% endblock %}
   </main>
+  {% if request.COOKIES.look == "zus" %}
+    <footer class="zus-status" aria-hidden="true">
+      <span>UŻYTKOWNIK</span><span>- Panel Użytkownika</span><span>- <span class="zus-page-name"></span></span>
+      <span class="zus-sep">Ustawienia cookies</span>
+      <span class="zus-sep">Do końca sesji pozostało: <b class="zus-session">15</b> min.</span>
+      <span class="zus-sep">Numer wersji: 6.05.001H</span>
+    </footer>
+    <script src="{% static 'sheetapp/zus.js' %}"></script>
+  {% endif %}
   {% include "sheetapp/_look_switch.html" %}
   <script>
     // A second click while a form is still being sent would send it again: ignore it until the next page.
@@ -65,6 +89,12 @@
     window.addEventListener("load", markWideTables);
     window.addEventListener("resize", markWideTables);
     // Back to this page (the browser's Back button): its forms can be sent again.
+    // The look menu closes again on a click anywhere else, or on Escape.
+    const lookMenu = document.querySelector(".look-switch");
+    document.addEventListener("click", e => { if (lookMenu.open && !lookMenu.contains(e.target)) lookMenu.open = false; });
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape" && lookMenu.open) { lookMenu.open = false; lookMenu.querySelector("summary").focus(); }
+    });
     window.addEventListener("pageshow", () => {
       document.querySelectorAll("form[data-sending]").forEach(form => { delete form.dataset.sending; });
     });

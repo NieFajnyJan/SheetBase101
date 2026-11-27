@@ -443,18 +443,20 @@ def summary(request):
 
 # The look of the app, as each browser chose it: the normal one, or the brutalist one (see app.css).
 # A cookie, so the page comes in that look straight away and the switch works without JavaScript.
-LOOK_COOKIE, BRUTALIST = "look", "brutalist"
+LOOK_COOKIE, BRUTALIST, ZUS = "look", "brutalist", "zus"
+LOOKS = (BRUTALIST, ZUS)  # besides the normal one, which is no cookie at all
 
 
 @require_POST
 def set_look(request):
-    """The switch in the header: turns the brutalist look on or off, then back to the page it was clicked on."""
+    """The look menu in the bottom right corner: the normal, brutalist or ZUS look, then back to the page it was picked on."""
     back = request.POST.get("next", "")
     if not url_has_allowed_host_and_scheme(back, {request.get_host()}, require_https=request.is_secure()):
         back = reverse("transactions")
     response = redirect(back)
-    if request.POST.get("look") == BRUTALIST:
-        response.set_cookie(LOOK_COOKIE, BRUTALIST, max_age=365 * 24 * 60 * 60, samesite="Lax")
+    look = request.POST.get("look")
+    if look in LOOKS:
+        response.set_cookie(LOOK_COOKIE, look, max_age=365 * 24 * 60 * 60, samesite="Lax")
     else:
         response.delete_cookie(LOOK_COOKIE, samesite="Lax")
     return response
